@@ -1,0 +1,70 @@
+---
+title: Teleop Project (x86_64 PC)
+sidebar_position: 3
+---
+
+Use `venv/pico` for Pico / XR body tracking and realtime retarget inspection on a laptop or desktop. Record and replay motion clips from the root project with the any4hdmi-backed scripts.
+
+## Setup
+
+```bash
+uv sync --project venv/pico
+```
+
+### Install XRoboToolkit PC Service
+
+Download the `.deb` from:
+
+[https://github.com/XR-Robotics/XRoboToolkit-PC-Service/releases](https://github.com/XR-Robotics/XRoboToolkit-PC-Service/releases)
+
+```bash
+sudo apt install -y ./XRoboToolkit_PC_Service_*.deb
+```
+
+Start `XRoboToolkit` / `XRobot` from the desktop or app launcher after installation.
+
+### Clone the Pico SDK repos
+
+```bash
+mkdir -p external
+git clone https://github.com/YanjieZe/XRoboToolkit-PC-Service-Pybind.git \
+  external/XRoboToolkit-PC-Service-Pybind
+git clone https://github.com/XR-Robotics/XRoboToolkit-PC-Service.git \
+  external/XRoboToolkit-PC-Service
+```
+
+### Build and install `xrobotoolkit_sdk`
+
+```bash
+bash scripts/setup/setup_xrobot_pybind.sh
+```
+
+The script expects the two repos above to exist under `external/`.
+
+### Enable Pico streaming
+
+1. Wear the leg trackers.
+2. Finish whole-body tracking calibration.
+3. Open `XRoboToolkit`, connect to this machine, and enable whole-body streaming.
+
+## Verify Installation
+
+Start the live retarget publisher:
+
+```bash
+uv run --project venv/pico sim2real/teleop/pico_retarget_pub.py
+```
+
+Open the mjviser URL printed by the publisher. If it updates with live G1 retargeted motion, the teleop stack is ready.
+
+To record and replay a qpos clip after the live publisher is running, switch to the root project environment:
+
+```bash
+uv run scripts/record_motion.py
+uv run scripts/view_motion.py --motion g1_motion_YYYYMMDD_HHMMSS/motions/motion.npz
+```
+
+## Next Steps
+
+- [Pico Teleoperation](/tutorials/pico-teleoperation)
+- [Motion Recording](/tutorials/motion-recording)

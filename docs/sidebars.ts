@@ -1,0 +1,119 @@
+import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+
+const sidebars: SidebarsConfig = {
+  docsSidebar: [
+    'intro',
+    'leaderboard',
+    {
+      type: 'category',
+      label: 'Getting Started',
+      items: [
+        {
+          type: 'doc',
+          id: 'getting-started/overview',
+          label: 'Overview',
+        },
+        {
+          type: 'doc',
+          id: 'getting-started/network-configuration',
+          label: 'Network Configuration',
+        },
+        {
+          type: 'doc',
+          id: 'getting-started/root-project',
+          label: 'Root Project',
+        },
+        {
+          type: 'doc',
+          id: 'getting-started/teleop-x86-64',
+          label: 'Teleop Project (x86_64 PC)',
+        },
+        {
+          type: 'doc',
+          id: 'getting-started/teleop-onboard-orin',
+          label: 'Teleop Project (Onboard Orin)',
+        },
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Tutorials',
+      items: [
+        'tutorials/offline-motion-tracking',
+        'tutorials/cross-codebase-evaluation',
+        'tutorials/pico-teleoperation',
+        'tutorials/motion-recording',
+        'tutorials/run-external-policies',
+      ],
+    },
+    'faq',
+    {
+      type: 'category',
+      label: 'Reference',
+      items: [
+        {
+          type: 'doc',
+          id: 'artifacts',
+          label: 'Download Artifacts',
+        },
+        {
+          type: 'doc',
+          id: 'robot_io',
+          label: 'Robot I/O',
+        },
+        {
+          type: 'doc',
+          id: 'tracking_framework',
+          label: 'Tracking Framework',
+        },
+        {
+          type: 'doc',
+          id: 'pico_to_g1',
+          label: 'Pico To G1',
+        },
+        {
+          type: 'doc',
+          id: 'teleop_impl',
+          label: 'Teleop Implementation',
+        },
+        {
+          type: 'doc',
+          id: 'policy_yaw_alignment',
+          label: 'Yaw Alignment',
+        },
+        {
+          type: 'doc',
+          id: 'motion_stream_disconnects',
+          label: 'Motion Stream Disconnects',
+        },
+        {
+          type: 'doc',
+          id: 'npz_motion_publisher',
+          label: 'NPZ Motion Publisher',
+        },
+        {
+          type: 'doc',
+          id: 'sonic_smpl_input',
+          label: 'SONIC SMPL Input',
+        },
+        {
+          type: 'doc',
+          id: 'xrobot_grpc_jetpack5',
+          label: 'XRobot gRPC JetPack 5',
+        },
+        {
+          type: 'doc',
+          id: 'onboard_jetpack5_inference_backends',
+          label: 'Onboard JetPack 5 Inference Backends',
+        },
+        {
+          type: 'doc',
+          id: 'xrobotoolkit_pc_service_arm64_build',
+          label: 'XRoboToolkit PC Service ARM64 Build',
+        },
+      ],
+    },
+  ],
+};
+
+export default sidebars;

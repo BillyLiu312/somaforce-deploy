@@ -1,0 +1,36 @@
+---
+title: 动作跟踪排行榜
+description: 在统一 G1 评测协议下对比已发布的动作跟踪策略。
+hide_table_of_contents: true
+---
+
+import Leaderboard from '@site/src/components/Leaderboard';
+import Link from '@docusaurus/Link';
+
+# 动作跟踪排行榜
+
+<div className="leaderboard-page">
+
+<Link className="button button--primary button--sm" to="/tutorials/cross-codebase-evaluation">复现评测 →</Link>
+
+<Leaderboard locale="zh" />
+
+:::note 指标范围
+Tracking Return 衡量经过 pelvis XY/yaw 对齐后的局部姿态质量。Progress 与 Tracking Return 共用 pelvis 高度/projected-gravity 终止条件，并且只累计终止前 reward。
+:::
+
+## 评测协议
+
+- 默认 held-out benchmark 为 MotionDecode Locomotion-80、Manipulation-48、Ground-60 和 Dance-40；旧版 `L = LAFAN-40`、`P = PHUMA-30`、`R = Root-90` 仍可勾选。
+- 每个 headline 是所选且可用的 dataset mean 的等权平均；每个 dataset 内所有 motion 等权，第二行直接展示各 dataset mean。
+- **身体位置 / 姿态：** 局部身体位置 / 姿态误差；越低越好。
+- **全局 Root：** 仅 root 的轨迹误差；越低越好。MotionDecode 只在 Locomotion 上统计，其他三组显示 `n/a` 且不进入 headline。
+- **GPU Hours：** 有权威来源时展示并链接训练成本；它与 dataset 选择无关。
+- **手腕位置 / 姿态：** 左右手腕位置 / 姿态误差；越低越好。MotionDecode Ground 和 Dance 显示 `n/a`，且不进入 headline。
+- **Tracking Return：** normalized tracking return；越高越好。
+- **Progress：** motion completion；越高越好。
+- 所有策略统一使用 seed 0、`initial_pause_s=0.0`、无运行时上限以及相同的失败判定。完整定义和复现命令见[跨代码库动作跟踪评测](/tutorials/cross-codebase-evaluation)。
+
+最后更新：2026 年 9 月 2 日。
+
+</div>

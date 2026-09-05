@@ -1,0 +1,50 @@
+[project]
+name = "hdmi-sim2real-pico"
+version = "0.1.0"
+description = "Isolated Pico/XR teleoperation environment for sim2real"
+requires-python = "==3.10.*"
+dependencies = [
+    "mujoco",
+    "mjviser",
+    "mjhub @ git+https://github.com/EGalahad/mjhub.git@main",
+    "loguru",
+    "pyyaml",
+    "scipy",
+    "pyzmq",
+    "tqdm",
+    "tyro",
+    # "viser>=1.0.24",
+    "general_motion_retargeting",
+    "xrobotoolkit-sdk",
+    "loop-rate-limiters",
+    "pybind11",
+    "torch",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["../.."]
+include = [
+    "sim2real",
+    "sim2real.teleop*",
+    "sim2real.config*",
+    "sim2real.utils*",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+general-motion-retargeting = { git = "https://github.com/EGalahad/GMR.git", branch = "codex/add-pyproject-toml" }
+xrobotoolkit-sdk = { path = "../../external/XRoboToolkit-PC-Service-Pybind", editable = true }
+torch = [
+    { index = "pytorch-cpu", marker = "platform_machine == 'aarch64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
