@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task": "replace-with-task-name",
+  "nominal_backend": "hdmi_student",
+  "residual_training_nominal_backend": "hdmi_student",
+  "artifacts": [
+    {
+      "name": "nominal/student.onnx",
+      "role": "hdmi_student",
+      "sha256": "replace-with-64-lowercase-hex",
+      "required": true
+    },
+    {
+      "name": "residual/cross.onnx",
+      "role": "cross_residual",
+      "sha256": "replace-with-64-lowercase-hex",
+      "required": true
+    },
+    {
+      "name": "normalization.npz",
+      "role": "frozen_normalization",
+      "sha256": "replace-with-64-lowercase-hex",
+      "required": true
+    },
+    {
+      "name": "reference.npz",
+      "role": "reference_motion",
+      "sha256": "replace-with-64-lowercase-hex",
+      "required": true
+    }
+  ]
+}

@@ -9,6 +9,9 @@ stubs
 /sync-robot.sh
 !/tests/
 /tests/*
+!/tests/test_somaforce_contracts.py
+!/tests/test_nominal_interfaces.py
+!/tests/test_runtime_stack.py
 !/tests/test_robot_io.py
 !/tests/test_command_sender.py
 !/tests/test_motion_buffer.py

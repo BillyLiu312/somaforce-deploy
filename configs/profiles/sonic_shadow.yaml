@@ -1,6 +1,6 @@
-mode: shadow
+mode: sonic_residual_shadow
 nominal_backend: sonic
-residual_enabled: false
+residual_enabled: true
 residual_shadow: true
 control_hz: 50
 authority: 0.0

@@ -1,6 +1,6 @@
 mode: mujoco
 nominal_backend: hdmi_student
-residual_enabled: false
+residual_enabled: true
 residual_shadow: true
 control_hz: 50
 physics_dt: 0.005

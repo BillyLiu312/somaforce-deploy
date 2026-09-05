@@ -111,3 +111,16 @@ Repo skills 统一放在 `.agents/skills/`，无需手动复制到
   note         = {Documentation: \url{https://egalahad.github.io/sim2real/}}
 }
 ```
+
+
+## SomaForce 部署
+
+本仓库同时保留 HDMI student、Sonic nominal 与共享 SomaForce Cross residual 的部署契约。
+详见 [SomaForce 部署说明](./docs/somaforce_deployment.md)。离线 replay、MuJoCo 和真机
+使用同一个 DeploymentStack，只替换 RobotIO 后端；请按 offline replay、MuJoCo sim2sim、
+nominal 真机、residual shadow、C0 parity、低 authority pilot 的顺序推进。
+
+每个 task artifact 需要 manifest.json、nominal/residual ONNX、冻结 normalization 和
+reference data。使用 configs/tasks/manifest.example.json 生成 manifest，并运行：
+
+    python scripts/verify_artifacts.py artifacts/<task>/manifest.json
