@@ -29,12 +29,12 @@ RobotIO 实现。
 原生 HDMI student 可以导出为单一 deterministic action graph，也可以导出两个 graph：
 
 ```text
-adapt_ema(policy[249], object[10]) -> priv_pred[256]
+adapt_ema(policy[249], command[356], object[10]) -> priv_pred[256]
 actor_adapt(command[356], policy[249], priv_pred[256]) -> action[23]
 ```
 
 `HDMIStudentTwoStageNominal` 强制检查上述 shape。Residual 输入为
-`wrist_tokens[1,2,16,14]`、`proprio[1,64]`、`a_nom_history[1,3,23]` 和
+`wrist_tokens[1,2,16,14]`、`proprio[1,64]`、`a_nom_history[1,23,3]` 和
 `previous_a_total[1,23]`，输出 normalized `delta_a[1,23]`。F/T 标定、坐标变换、
 接触门控、authority ramp 和物理 action scaling 保持在 ONNX 图外。
 

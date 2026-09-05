@@ -31,7 +31,9 @@ class HDMIStudentTwoStageNominal(NominalPolicy):
         policy=require_array(policy,(1,HDMI_STUDENT_POLICY_DIM),"policy")
         if object_obs is None: raise ValueError("HDMI student requires object observation [1,10]")
         object_obs=require_array(object_obs,(1,HDMI_STUDENT_OBJECT_DIM),"object_obs")
-        latent_out=self.adapt_ema({"policy":policy,"object":object_obs})
+        # ppo_roa uses CatTensors([policy, command, object]) when
+        # adapt_module_input_cmd=true, which is the current student config.
+        latent_out=self.adapt_ema({"policy":policy,"command":command,"object":object_obs})
         latent=require_array(latent_out.get("priv_pred",latent_out.get("latent")),(1,HDMI_STUDENT_LATENT_DIM),"student latent")
         action_out=self.actor_adapt({"command":command,"policy":policy,"priv_pred":latent,"latent":latent})
         return require_array(action_out["action"],(1,ACTION_DIM),"student action")

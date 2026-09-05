@@ -15,7 +15,7 @@ from somaforce_deploy.runtime import DeploymentStack
 
 class _Adapt:
     def __call__(self, inputs):
-        assert set(inputs) == {"policy", "object"}
+        assert set(inputs) == {"policy", "command", "object"}
         return {"priv_pred": np.zeros((1, 256), dtype=np.float32)}
 
 

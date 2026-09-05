@@ -50,7 +50,8 @@ class ActionHistory:
 
     @property
     def values(self) -> np.ndarray:
-        return np.stack(tuple(self._values), axis=1).astype(np.float32)
+        # Cross policy contract is [B, action_dim, history], newest last.
+        return np.stack(tuple(self._values), axis=1).transpose(0, 2, 1).astype(np.float32)
 
     @property
     def previous(self) -> np.ndarray:

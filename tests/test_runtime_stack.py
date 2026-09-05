@@ -31,4 +31,4 @@ def test_shadow_computes_but_does_not_apply_residual():
     np.testing.assert_allclose(result.composed, 1.0)
     np.testing.assert_allclose(result.applied, 0.0)
     assert result.shadow
-    assert stack.history.values.shape == (1, 3, 23)
+    assert stack.history.values.shape == (1, 23, 3)

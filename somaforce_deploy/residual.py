@@ -7,7 +7,7 @@ class InferenceModule(Protocol):
 class CrossResidual:
     def __init__(self,inference): self.inference=inference
     def step(self, *, wrist_tokens, proprio, a_nom_history, previous_a_total):
-        inputs={"wrist_tokens":require_array(wrist_tokens,(1,2,16,14),"wrist_tokens"),"proprio":require_array(proprio,(1,64),"proprio"),"a_nom_history":require_array(a_nom_history,(1,3,23),"a_nom_history"),"previous_a_total":require_array(previous_a_total,(1,23),"previous_a_total")}
+        inputs={"wrist_tokens":require_array(wrist_tokens,(1,2,16,14),"wrist_tokens"),"proprio":require_array(proprio,(1,64),"proprio"),"a_nom_history":require_array(a_nom_history,(1,23,3),"a_nom_history"),"previous_a_total":require_array(previous_a_total,(1,23),"previous_a_total")}
         out=self.inference(inputs); key="residual" if "residual" in out else "action"
         return require_array(out[key],(1,23),"residual action")
 def compose_action(a_nom,delta_a,*,authority=1.0,contact_gain=1.0,action_limit=1.0):

@@ -30,13 +30,13 @@ The native HDMI student can be exported as one deterministic action graph or as
 two graphs:
 
 ```text
-adapt_ema(policy[249], object[10]) -> priv_pred[256]
+adapt_ema(policy[249], command[356], object[10]) -> priv_pred[256]
 actor_adapt(command[356], policy[249], priv_pred[256]) -> action[23]
 ```
 
 `HDMIStudentTwoStageNominal` enforces this shape contract. The residual export
 takes `wrist_tokens[1,2,16,14]`, `proprio[1,64]`,
-`a_nom_history[1,3,23]`, and `previous_a_total[1,23]`, returning normalized
+`a_nom_history[1,23,3]`, and `previous_a_total[1,23]`, returning normalized
 `delta_a[1,23]`. F/T calibration, frame transforms, contact gating, authority
 ramping, and physical action scaling remain outside ONNX.
 

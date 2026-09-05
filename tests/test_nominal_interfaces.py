@@ -19,6 +19,7 @@ def test_hdmi_student_output_boundary():
 def test_hdmi_two_stage_binding():
     class Adapt:
         def __call__(self, inputs):
+            assert set(inputs) == {"policy", "command", "object"}
             return {"priv_pred": np.zeros((1, 256), np.float32)}
     class Actor:
         def __call__(self, inputs):

@@ -34,7 +34,7 @@ normalization, and reference data. Verify a bundle before starting:
     python -c "from somaforce_deploy.artifacts import ArtifactManifest; ArtifactManifest.load('artifacts/<task>/manifest.json').verify()"
 
 The HDMI student export may be one deterministic action graph or the two-stage
-adapt_ema(policy, object) -> priv_pred and actor_adapt(command, policy, priv_pred)
+adapt_ema(policy, command, object) -> priv_pred and actor_adapt(command, policy, priv_pred)
 binding exposed by HDMIStudentTwoStageNominal. Sonic reference conversion must pin
 50 Hz timing, root-yaw alignment, future-step semantics, and joint mapping.
 
