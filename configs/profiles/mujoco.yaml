@@ -1,0 +1,10 @@
+mode: mujoco
+nominal_backend: hdmi_student
+residual_enabled: false
+residual_shadow: true
+control_hz: 50
+physics_dt: 0.005
+decimation: 4
+authority: 0.0
+contact_gain: 0.0
+reference_backend: npz

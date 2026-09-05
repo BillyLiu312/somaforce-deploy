@@ -1,0 +1,8 @@
+mode: shadow
+nominal_backend: hdmi_student
+residual_enabled: false
+residual_shadow: true
+control_hz: 50
+authority: 0.0
+contact_gain: 0.0
+reference_backend: zmq

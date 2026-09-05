@@ -1,0 +1,8 @@
+mode: pilot
+nominal_backend: hdmi_student
+residual_enabled: true
+residual_shadow: false
+control_hz: 50
+authority: 0.0
+contact_gain: 0.0
+reference_backend: zmq
