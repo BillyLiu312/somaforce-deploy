@@ -18,6 +18,7 @@ stubs
 !/tests/test_sonic_dict_policy.py
 !/tests/test_hand_grip.py
 !/tests/test_pico_hand_grip.py
+!/tests/test_mujoco_ft.py
 !/tests/test_dh116s_keyboard_control.py
 !/tests/test_bfm_zero_observations.py
 /third_party/*
@@ -45,6 +46,13 @@ docs/build/
 docs/.eslintcache
 docs/npm-debug.log*
 docs/yarn-*.log
+
+# HDMI and Cross do not currently document redistribution permission for these
+# local policy, motion, and simulator assets. Reconstruct them from their source
+# checkouts as described in the README; never add them with `git add -f`.
+/artifacts/
+/assets/mujoco/
+/sim2real/hdmi_tag_runtime/
 
 # Local credentials and network profiles must never be committed.
 .env

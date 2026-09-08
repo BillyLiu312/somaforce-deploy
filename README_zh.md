@@ -124,3 +124,109 @@ nominal 真机、residual shadow、C0 parity、低 authority pilot 的顺序推�
 reference data。使用 configs/tasks/manifest.example.json 生成 manifest，并运行：
 
     python scripts/verify_artifacts.py artifacts/<task>/manifest.json
+
+本地 `artifacts/hdmi_push_box/` 放置 HDMI student 和 Cross residual 两个 ONNX；
+Git 会忽略模型二进制。
+可以先运行组合层 smoke，再运行无界面的 MuJoCo 物理 smoke：
+
+    python scripts/validate_onnx_bundle.py --student artifacts/hdmi_push_box/student.onnx --residual artifacts/hdmi_push_box/cross_residual.onnx --authority 0.0 --contact-gain 0.0 --shadow
+    python scripts/mujoco_bundle_smoke.py --student artifacts/hdmi_push_box/student.onnx --residual artifacts/hdmi_push_box/cross_residual.onnx --control-steps 25 --authority 0.1 --contact-gain 0.2
+
+后一个 smoke 当前明确使用零值合成 F/T token，只验证部署闭环和 MuJoCo 物理稳定性；
+真实 push-box 接触传感器映射仍需单独接入。
+
+真实的本地 G1+box 接触评测命令如下：
+
+    python scripts/evaluate_push_box_mujoco.py --student artifacts/hdmi_push_box/student.onnx --residual artifacts/hdmi_push_box/cross_residual.onnx --output outputs/mujoco_eval/push_box_movable_full.npz --authority 0.05 --contact-gain 1.0
+
+该评测会记录 `[T,2,6]` 的 wrist 局部坐标系 wrench 和 `[T,2,16,14]` 的 Cross token。
+脚本保持 free root，并将碰撞几何限制为 wrist-to-box；
+这属于传感器映射评测配置，不是完整 locomotion 或 Isaac acceptance。
+## 自由基座 MuJoCo 评测与渲染
+
+使用无约束 floating base 运行 HDMI student + Cross residual。评测遇到非有限状态或 pelvis 高度低于阈值会停止，并保存完整 `qpos/qvel`、真实接触 wrench 和 Cross token：
+
+    python scripts/evaluate_push_box_mujoco.py --student artifacts/hdmi_push_box/student.onnx --residual artifacts/hdmi_push_box/cross_residual.onnx --output outputs/mujoco_eval/push_box_free_root_terminated.npz --authority 0.05 --contact-gain 1.0 --stop-on-instability --root-height-failure 0.45
+
+使用离屏 MuJoCo 渲染视频；没有 `DISPLAY` 时脚本会自动选择 EGL：
+
+    python scripts/render_push_box_mujoco.py --record outputs/mujoco_eval/push_box_free_root_terminated.npz --output outputs/mujoco_eval/push_box_free_root_terminated.mp4
+
+如需完整模型碰撞几何检查（不使用 wrist-to-box 过滤），增加 `--all-contact-geometry`。
+### 当前 free-root 对照结果
+
+已增加 Cross scaffold-only 的 MuJoCo 适配，用于验证 privileged teacher baseline；它不属于 deployable student。当前对照结果：
+
+- root-anchor 模式已取消，不再作为稳定性证据。
+- `scaffold_reference_reset_free_root_100.npz`：free-root，约 55 步因 pelvis 高度跌倒。
+- `student_nominal_aligned_lerp_200.npz`：student nominal，free-root 约 60 步跌倒。
+- `student_cross_aligned_lerp_box_200.npz`：student + Cross residual，free-root 约 60 步跌倒。
+
+所有后续结果均使用 free-root。当前 scaffold、student nominal、student + residual 均在约 40-55 个 control steps 内跌倒，说明仍需修复物理标定、资产几何和运行时语义对齐；不能通过 root anchor 或提高 residual authority 规避这一问题。
+
+当前默认 residual artifact 为 task-onehot checkpoint 的导出：
+`cross_residual.onnx`，来源 `segment_0023`（`iteration=733`、
+`6,004,736` transitions、stage=`C2`）。旧的 segment-0079 图保留为
+`cross_residual_segment0079.onnx`，仅用于 provenance 对照。
+
+### HDMI nominal baseline 状态
+
+当前基线只看 HDMI student，暂不把 Cross residual 纳入结论。HDMI 原生
+Isaac headless rollout 使用 student finetune resume checkpoint 完成了
+792-step push-box episode，`success=1.0`。对应 MuJoCo free-root 使用 HDMI
+配置中的 `mujoco_physics_dt=0.002`、decimation=10 后，仍在 57 个 control
+steps 触发 pelvis 高度保护。这说明当前主要是 MuJoCo 资产/动力学对齐失败，
+不能据此否定 HDMI 蒸馏 student。
+
+### 官方 HDMI tag runtime
+
+headless harness 会从单独 checkout 的官方 HDMI tag 加载 policy 和 MuJoCo
+模块，本仓库不 vendor upstream 源码。harness 同时覆盖了官方 tag 的默认端口
+错误：`CommandSender` 使用 `55901`，MuJoCo bridge 使用 `5591`；本地统一为
+`5591`。push-box
+当前 tag-compatible free-root 运行仍会跌倒，不能称为稳定成功；suitcase
+student 已在 checkpoint 对齐参数下完成一个搬运周期，具体边界见下文。
+使用的 upstream commit 是 `0007b02069a934324ec37b8e194e6a1c918e251b`。
+
+当前 HDMI tag harness 的默认任务是 upstream suitcase 设置。upstream scene
+使用 `SIMULATE_DT=0.005`，但本地训练的 suitcase checkpoint 明确记录了
+`mujoco_physics_dt=0.002`。与 checkpoint 对齐的单个 motion cycle headless
+复现命令如下：
+
+模型、motion 和 mesh 大文件不会进入 Git。运行前从本地 HDMI 导出目录和
+upstream `hdmi` tag checkout 准备这些文件：
+
+```bash
+git clone --depth 1 --branch hdmi https://github.com/EGalahad/sim2real.git ../sim2real-hdmi-upstream
+mkdir -p artifacts/hdmi_move_suitcase/hdmi_tag assets/mujoco/reference/hdmi_suitcase
+cp ../HDMI/scripts/exports/G1TrackSuitcase/policy-cbvbj5hd-final.onnx artifacts/hdmi_move_suitcase/hdmi_tag/student.onnx
+cp ../HDMI/scripts/exports/G1TrackSuitcase/policy-cbvbj5hd-final.yaml artifacts/hdmi_move_suitcase/hdmi_tag/policy.yaml
+cp ../HDMI/scripts/exports/G1TrackSuitcase/policy-cbvbj5hd-final.json artifacts/hdmi_move_suitcase/hdmi_tag/policy.json
+cp ../HDMI/data/motion/g1/omomo/sub1_suitcase_011/motion.npz assets/mujoco/reference/hdmi_suitcase/motion.npz
+cp ../HDMI/data/motion/g1/omomo/sub1_suitcase_011/meta.json assets/mujoco/reference/hdmi_suitcase/meta.json
+```
+
+预期 student ONNX SHA256 为
+`1f847c8b648f09d1046518c05264b8a5c591aca1ba020554404b71bf919787ad`。
+
+```bash
+# 终端 1
+python scripts/run_hdmi_tag_headless_sim.py \
+  --seconds 12 --sim-dt 0.002 --initialize-motion-frame \
+  --elastic-band-release-after 0 \
+  --trajectory outputs/hdmi_tag_suitcase/trajectory.npz
+
+# 在终端 1 启动后两秒内启动终端 2
+python scripts/run_hdmi_tag_headless_policy.py --steps 472
+
+MUJOCO_GL=egl python scripts/render_push_box_mujoco.py --scene suitcase \
+  --scene-path ../sim2real-hdmi-upstream/data/robots/g1/g1_29dof_rubberhand-suitcase.xml \
+  --record outputs/hdmi_tag_suitcase/trajectory.npz \
+  --output outputs/hdmi_tag_suitcase/trajectory.mp4 --fps 500
+```
+
+`--initialize-motion-frame` 会同时从参考动作首帧初始化机器人和 suitcase。
+`--elastic-band-release-after 0` 等价于策略启动后立刻按 `9`，同时清除最后一次
+gantry 外力。当前本地对照中，未修改的 tag `0.005` timing 会跌倒；与 checkpoint
+对齐的 `0.002` 可以完成第一个 suitcase 搬运周期。两者都不是硬件验收；全程
+开启 gantry 的结果也不能表述为无辅助 locomotion 稳定性。

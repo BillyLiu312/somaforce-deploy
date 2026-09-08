@@ -16,6 +16,21 @@ def test_hdmi_student_output_boundary():
     action = HDMIStudentNominal(FakeStudent()).step(command=np.zeros((1, 356), np.float32), policy=np.zeros((1, 249), np.float32), object_obs=np.zeros((1, 10), np.float32))
     assert action.shape == (1, 23)
 
+def test_hdmi_student_accepts_native_linear_output_name():
+    class NativeExport:
+        def __call__(self, _inputs):
+            return {
+                "linear_6": np.zeros((23,), np.float32),
+                "mul": np.zeros((23,), np.float32),
+            }
+
+    action = HDMIStudentNominal(NativeExport()).step(
+        command=np.zeros((1, 356), np.float32),
+        policy=np.zeros((1, 249), np.float32),
+        object_obs=np.zeros((1, 10), np.float32),
+    )
+    assert action.shape == (1, 23)
+
 def test_hdmi_two_stage_binding():
     class Adapt:
         def __call__(self, inputs):
