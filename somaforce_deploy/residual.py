@@ -14,4 +14,5 @@ class CrossResidual:
         return require_array(value,(1,23),"residual action")
 def compose_action(a_nom,delta_a,*,authority=1.0,contact_gain=1.0,action_limit=1.0):
     nominal=require_array(a_nom,(1,23),"a_nom"); residual=require_array(delta_a,(1,23),"delta_a")
-    return np.clip(nominal+residual*np.asarray(authority,dtype=np.float32)*np.asarray(contact_gain,dtype=np.float32),-float(action_limit),float(action_limit)).astype(np.float32)
+    bounded=np.tanh(residual).astype(np.float32)*np.asarray(authority,dtype=np.float32)*np.asarray(contact_gain,dtype=np.float32)
+    return np.clip(nominal+bounded,-float(action_limit),float(action_limit)).astype(np.float32)

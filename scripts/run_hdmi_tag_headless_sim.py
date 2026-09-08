@@ -18,6 +18,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from somaforce_deploy.hdmi_sim2sim import TASKS, get_task, materialize_scene, task_motion_dir
+from somaforce_deploy.hdmi_residual_runtime import (
+    RESIDUAL_FT_PORT,
+    RESIDUAL_LOCKSTEP_PORT,
+    LockstepServer,
+    ResidualFTFrame,
+    ResidualFTPublisher,
+)
+from somaforce_deploy.mujoco_ft import MujocoWristFTSensor
 
 
 class _HeadlessViewer:
@@ -60,7 +68,16 @@ def main() -> int:
     parser.add_argument("--disable-elastic-band", action="store_true")
     parser.add_argument("--elastic-band-release-after", type=float, default=0.0)
     parser.add_argument("--initialize-motion-frame", action="store_true")
+    parser.add_argument("--publish-residual-ft", action="store_true")
+    parser.add_argument("--residual-ft-port", type=int, default=RESIDUAL_FT_PORT)
+    parser.add_argument("--residual-ft-decimation", type=int, default=10)
+    parser.add_argument("--stop-file", type=Path, default=None)
+    parser.add_argument("--lockstep-port", type=int, default=0)
     args = parser.parse_args()
+    if args.residual_ft_decimation <= 0:
+        raise ValueError("residual-ft-decimation must be positive")
+    if args.stop_file is not None and args.stop_file.exists():
+        raise FileExistsError(f"stop file already exists: {args.stop_file}")
 
     task = get_task(args.task)
     upstream_root = args.upstream_root.resolve()
@@ -153,13 +170,72 @@ def main() -> int:
                 simulation.mj_data.qvel[velocity_address] = motion["joint_vel"][0, joint_index]
             mujoco.mj_forward(simulation.mj_model, simulation.mj_data)
 
+        ft_sensor = None
+        ft_publisher = None
+        lockstep = (
+            LockstepServer(args.lockstep_port or RESIDUAL_LOCKSTEP_PORT)
+            if args.lockstep_port
+            else None
+        )
+        if args.publish_residual_ft:
+            object_body_name = task.primary_object_body
+            try:
+                simulation.mj_model.body(object_body_name)
+            except KeyError:
+                object_body_name = f"{object_body_name}_body"
+            ft_sensor = MujocoWristFTSensor(
+                simulation.mj_model,
+                object_body_name=object_body_name,
+            )
+            ft_publisher = ResidualFTPublisher(args.residual_ft_port)
+
         qpos_history: list[np.ndarray] = []
         original_step = simulation.sim_step
+        physics_steps = 0
+        idle_steps = 0
+        ft_sequence = 0
+        pending_substeps = 0
+
+        def publish_ft() -> None:
+            nonlocal ft_sequence
+            if ft_sensor is None or ft_publisher is None:
+                return
+            sample = ft_sensor.sample(simulation.mj_data)
+            ft_publisher.send(
+                ResidualFTFrame(
+                    timestamp_ns=time.time_ns(),
+                    sequence=ft_sequence,
+                    contact_count=sample.contact_count,
+                    total_force_norm=sample.total_force_norm,
+                    token=sample.token,
+                    wrench_base_yaw=sample.wrench_base_yaw,
+                )
+            )
+            ft_sequence += 1
 
         def recorded_step() -> None:
+            nonlocal physics_steps, idle_steps, pending_substeps
+            if args.stop_file is not None and args.stop_file.exists():
+                simulation.viewer.close()
+                return
+            if lockstep is not None and pending_substeps == 0:
+                if not lockstep.requested():
+                    simulation.sim_bridge.publish_low_state()
+                    idle_steps += 1
+                    if idle_steps % int(args.residual_ft_decimation) == 0:
+                        publish_ft()
+                    time.sleep(simulation.sim_dt)
+                    return
+                pending_substeps = int(args.residual_ft_decimation)
+                # The low command is published immediately before the request.
+                # Give the independent PUB/SUB socket one physics tick to deliver it.
+                time.sleep(simulation.sim_dt)
             simulation.sim_bridge._poll_low_cmd()
             if not simulation.sim_bridge.has_received_command:
                 simulation.sim_bridge.publish_low_state()
+                idle_steps += 1
+                if idle_steps % int(args.residual_ft_decimation) == 0:
+                    publish_ft()
                 time.sleep(simulation.sim_dt)
                 return
             if (
@@ -172,6 +248,14 @@ def main() -> int:
                 simulation.mj_data.xfrc_applied[simulation.band_attached_link, :3] = 0.0
                 print(f"released elastic band at sim_time={simulation.mj_data.time:.3f}")
             original_step()
+            physics_steps += 1
+            if lockstep is not None:
+                pending_substeps -= 1
+            if physics_steps % int(args.residual_ft_decimation) == 0:
+                publish_ft()
+            if lockstep is not None and pending_substeps == 0:
+                simulation.sim_bridge.publish_low_state()
+                lockstep.complete()
             qpos_history.append(simulation.mj_data.qpos.copy())
 
         simulation.sim_step = recorded_step
@@ -191,6 +275,12 @@ def main() -> int:
                     "elastic_band_release_after": args.elastic_band_release_after,
                     "initialize_motion_frame": bool(args.initialize_motion_frame),
                     "root_anchor": False,
+                    "residual_ft_published": bool(args.publish_residual_ft),
+                    "residual_ft_frames": int(ft_sequence),
+                    "lockstep": bool(lockstep is not None),
+                    "physics_substeps_per_policy_step": (
+                        int(args.residual_ft_decimation) if lockstep is not None else None
+                    ),
                 },
                 sort_keys=True,
             )

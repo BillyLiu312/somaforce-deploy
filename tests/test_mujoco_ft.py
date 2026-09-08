@@ -9,11 +9,13 @@ def test_mujoco_ft_sensor_detects_object_contact():
     <mujoco>
       <option timestep="0.002"/>
       <worldbody>
-        <body name="left_wrist_yaw_link" pos="0 0 0.1">
-          <geom name="wrist" type="sphere" size="0.05"/>
-        </body>
-        <body name="right_wrist_yaw_link" pos="2 0 0.1">
-          <geom type="sphere" size="0.05"/>
+        <body name="pelvis">
+          <body name="left_wrist_yaw_link" pos="0 0 0.1">
+            <geom name="wrist" type="sphere" size="0.05"/>
+          </body>
+          <body name="right_wrist_yaw_link" pos="2 0 0.1">
+            <geom type="sphere" size="0.05"/>
+          </body>
         </body>
         <body name="box" pos="0.08 0 0.1">
           <freejoint/>
@@ -26,9 +28,11 @@ def test_mujoco_ft_sensor_detects_object_contact():
     model = mujoco.MjModel.from_xml_string(xml)
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
-    sensor = MujocoWristFTSensor(model, contact_force_threshold=0.01)
+    sensor = MujocoWristFTSensor(model, force_scale_N=0.01, moment_scale_Nm=0.01)
     sample = sensor.sample(data)
     assert sample.contact_count > 0
     assert sample.contact_probability[0] > 0
     assert np.linalg.norm(sample.wrench[0, :3]) > 0
     assert sample.token.shape == (2, 14)
+    np.testing.assert_allclose(sample.token[:, :6], sample.normalized_wrench)
+    np.testing.assert_allclose(sample.quality, 1.0)

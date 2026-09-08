@@ -153,7 +153,7 @@ class PushBoxEvaluator:
         self._set_initial_state()
         self.fixed_box = bool(args.fixed_box)
         self.box_anchor_qpos = self.data.qpos[self.box_qpos_adr : self.box_qpos_adr + 7].copy()
-        self.sensor = MujocoWristFTSensor(self.model, contact_force_threshold=args.contact_threshold)
+        self.sensor = MujocoWristFTSensor(self.model, on_threshold=args.contact_threshold)
         self.student = HDMIStudentNominal(build_inference_module(str(args.student), "onnx-cpu"))
         self.scaffold_nominal = None
         if bool(args.scaffold_only):
@@ -465,7 +465,7 @@ def main() -> int:
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--authority", type=float, default=0.1)
     parser.add_argument("--contact-gain", type=float, default=1.0)
-    parser.add_argument("--contact-threshold", type=float, default=1.0)
+    parser.add_argument("--contact-threshold", type=float, default=0.05)
     parser.add_argument("--physics-dt", type=float, default=0.002)
     parser.add_argument("--ground-z", type=float, default=0.0)
     parser.add_argument("--decimation", type=int, default=10)

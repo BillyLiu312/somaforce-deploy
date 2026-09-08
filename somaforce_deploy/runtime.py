@@ -34,28 +34,29 @@ class ActionHistory:
     def __init__(self, length: int = 3) -> None:
         if length <= 0:
             raise ValueError("history length must be positive")
-        self._values: deque[np.ndarray] = deque(maxlen=length)
+        self._length = length
         self.reset()
 
     def reset(self) -> None:
-        self._values.clear()
-        zero = np.zeros((1, ACTION_DIM), dtype=np.float32)
-        self._values.extend(zero.copy() for _ in range(self._values.maxlen or 1))
+        self._values = np.zeros(
+            (1, ACTION_DIM, self._length), dtype=np.float32
+        )
 
     def append(self, action: np.ndarray) -> None:
         value = np.asarray(action, dtype=np.float32)
         if value.shape != (1, ACTION_DIM):
             raise ValueError(f"action history expects {(1, ACTION_DIM)}, got {value.shape}")
-        self._values.append(value.copy())
+        self._values[:, :, 1:] = self._values[:, :, :-1].copy()
+        self._values[:, :, 0] = value
 
     @property
     def values(self) -> np.ndarray:
-        # Cross policy contract is [B, action_dim, history], newest last.
-        return np.stack(tuple(self._values), axis=1).transpose(0, 2, 1).astype(np.float32)
+        # Cross policy contract is [B, action_dim, history], newest first.
+        return self._values.copy()
 
     @property
     def previous(self) -> np.ndarray:
-        return self._values[-1].copy()
+        return self._values[:, :, 0].copy()
 
 
 class DeploymentStack:
@@ -90,7 +91,10 @@ class DeploymentStack:
         self.contact_gain = float(contact_gain)
         self.action_limit = float(action_limit)
         self.watchdog = watchdog or Watchdog()
-        self.history = ActionHistory(length=3)
+        self.nominal_history = ActionHistory(length=3)
+        self.executed_history = ActionHistory(length=3)
+        # Backward-compatible public alias for the actually executed history.
+        self.history = self.executed_history
 
     @property
     def residual_enabled(self) -> bool:
@@ -101,7 +105,8 @@ class DeploymentStack:
         return self.mode.endswith("_shadow")
 
     def reset(self) -> None:
-        self.history.reset()
+        self.nominal_history.reset()
+        self.executed_history.reset()
 
     def step(
         self,
@@ -122,6 +127,7 @@ class DeploymentStack:
         nominal = np.asarray(self.nominal.step(**nominal_kwargs), dtype=np.float32)
         if nominal.shape != (1, ACTION_DIM):
             raise ValueError(f"nominal policy must return {(1, ACTION_DIM)}, got {nominal.shape}")
+        self.nominal_history.append(nominal)
 
         residual = np.zeros_like(nominal)
         if self.residual_enabled:
@@ -130,8 +136,8 @@ class DeploymentStack:
             residual = self.residual.step(
                 wrist_tokens=wrist_tokens,
                 proprio=proprio,
-                a_nom_history=self.history.values,
-                previous_a_total=self.history.previous,
+                a_nom_history=self.nominal_history.values,
+                previous_a_total=self.executed_history.previous,
             )
         composed = compose_action(
             nominal,
@@ -142,7 +148,7 @@ class DeploymentStack:
         )
         applied = nominal if self.shadow else composed
         self.watchdog.require_finite_action(applied)
-        self.history.append(applied)
+        self.executed_history.append(applied)
         return StepResult(
             nominal=nominal,
             residual=residual,

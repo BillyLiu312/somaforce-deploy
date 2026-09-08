@@ -50,7 +50,7 @@ if __name__ == "__main__":
         wrist_tokens=np.zeros((1, 2, 16, 14), np.float32),
         proprio=np.zeros((1, 64), np.float32),
     )
-    assert np.allclose(result.applied, .02)
+    assert np.allclose(result.applied, np.tanh(1.0) * .02)
     assert np.allclose(
         compose_action(
             np.zeros((1, 23), np.float32),
@@ -58,6 +58,6 @@ if __name__ == "__main__":
             authority=.1,
             contact_gain=.2,
         ),
-        .02,
+        np.tanh(1.0) * .02,
     )
     print("SomaForce deployment contracts: PASS")

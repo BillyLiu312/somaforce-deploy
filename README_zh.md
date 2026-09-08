@@ -264,3 +264,14 @@ MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
   --output outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory_hdmi_render.mp4 \
   --fps 500
 ```
+
+### Cross residual sim2sim
+
+Residual 闭环使用独立 lockstep 诊断：sim 端增加
+`--publish-residual-ft --lockstep-port 5581`；policy 端使用
+`--residual-mode shadow` 或 `--residual-mode c1`、`--lockstep-port 5581` 和
+`--residual-record <path>`。shadow 只计算 residual、实际施加 nominal；C1
+施加冻结的逐关节 authority、contact ramp 和 safety limit。paired 证据位于
+`outputs/hdmi_residual_sim2sim_20260908/summary.json`。两个任务在 C1 运行中
+都保持任务动作；这证明推理/组合/F-T 闭环接通，不证明统计收益或硬件就绪。
+其中 suitcase 样本的 force 指标略降；door 保持任务，但本次样本的 force 指标升高。
