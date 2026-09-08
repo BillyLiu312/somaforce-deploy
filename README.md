@@ -191,12 +191,12 @@ MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
 
 The residual loop has a separate lockstep diagnostic. Start the simulator with
 `--publish-residual-ft --lockstep-port 5581`, then start policy with
-`--residual-mode shadow` or `--residual-mode c1`, `--lockstep-port 5581`, and
+`--residual-mode shadow`, `--residual-mode c1`, or `--residual-mode c2`, `--lockstep-port 5581`, and
 `--residual-record <path>`. Shadow computes the residual but applies nominal;
 C1 applies the frozen per-joint authority, contact ramp, and safety limiters.
 The paired evidence is recorded in
-`outputs/hdmi_residual_sim2sim_20260908/summary.json`. Both tasks retain their
-motion in the C1 runs; this verifies the inference/composition/F-T loop but does
-not establish statistical benefit or hardware readiness.
-The suitcase sample had slightly lower force metrics with C1; the door sample
-retained the task but had higher force metrics.
+`outputs/hdmi_residual_sim2sim_20260908/summary.json`. C2 uses Cross authority
+`arms=0.18`, `waist=0.10`, `legs=0.08`. Both tasks retain their motion in the C1
+and C2 runs; this verifies the inference/composition/F-T loop but does not
+establish statistical benefit or hardware readiness. In this sample, C2 suitcase
+force p95 was near C1, while C2 door max force was lower than C1.

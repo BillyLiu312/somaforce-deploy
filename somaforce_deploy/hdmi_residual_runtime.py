@@ -135,11 +135,21 @@ class ResidualControlStep:
     contact_gain: float
 
 
-def c1_authority() -> np.ndarray:
-    values = np.full(ACTION_DIM, 0.04, dtype=np.float32)
-    values[[2, 5, 8]] = 0.05
-    values[[11, 12, 15, 16, 19, 20, 21, 22]] = 0.10
+def authority_for_stage(stage: str) -> np.ndarray:
+    if stage not in {"c1", "c2"}:
+        raise ValueError("residual authority stage must be c1 or c2")
+    if stage == "c1":
+        arms, waist, legs = 0.10, 0.05, 0.04
+    else:
+        arms, waist, legs = 0.18, 0.10, 0.08
+    values = np.full(ACTION_DIM, legs, dtype=np.float32)
+    values[[2, 5, 8]] = waist
+    values[[11, 12, 15, 16, 19, 20, 21, 22]] = arms
     return values
+
+
+def c1_authority() -> np.ndarray:
+    return authority_for_stage("c1")
 
 
 class HDMIResidualController:
@@ -157,8 +167,8 @@ class HDMIResidualController:
         velocity_limit: np.ndarray,
         control_dt: float = 0.02,
     ) -> None:
-        if mode not in {"shadow", "c1"}:
-            raise ValueError("residual mode must be shadow or c1")
+        if mode not in {"shadow", "c1", "c2"}:
+            raise ValueError("residual mode must be shadow, c1, or c2")
         self.residual = residual
         self.mode = mode
         self.default_joint_pos = require_array(default_joint_pos, (ACTION_DIM,), "default_joint_pos")
@@ -169,7 +179,7 @@ class HDMIResidualController:
         self.control_dt = float(control_dt)
         if self.control_dt <= 0.0 or np.any(self.action_scale <= 0.0):
             raise ValueError("control_dt and action_scale must be positive")
-        self.authority = c1_authority()
+        self.authority = authority_for_stage(mode) if mode != "shadow" else c1_authority()
         self.reset()
 
     def reset(self) -> None:

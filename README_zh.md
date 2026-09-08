@@ -269,9 +269,10 @@ MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
 
 Residual 闭环使用独立 lockstep 诊断：sim 端增加
 `--publish-residual-ft --lockstep-port 5581`；policy 端使用
-`--residual-mode shadow` 或 `--residual-mode c1`、`--lockstep-port 5581` 和
+`--residual-mode shadow`、`--residual-mode c1` 或 `--residual-mode c2`、`--lockstep-port 5581` 和
 `--residual-record <path>`。shadow 只计算 residual、实际施加 nominal；C1
 施加冻结的逐关节 authority、contact ramp 和 safety limit。paired 证据位于
-`outputs/hdmi_residual_sim2sim_20260908/summary.json`。两个任务在 C1 运行中
-都保持任务动作；这证明推理/组合/F-T 闭环接通，不证明统计收益或硬件就绪。
-其中 suitcase 样本的 force 指标略降；door 保持任务，但本次样本的 force 指标升高。
+`outputs/hdmi_residual_sim2sim_20260908/summary.json`。C2 使用 Cross authority：
+arms=`0.18`、waist=`0.10`、legs=`0.08`。两个任务在 C1 和 C2 运行中都保持
+任务动作；这证明推理/组合/F-T 闭环接通，不证明统计收益或硬件就绪。本次样本中
+C2 suitcase 的 force p95 接近 C1，而 C2 door 的最大 force 低于 C1。

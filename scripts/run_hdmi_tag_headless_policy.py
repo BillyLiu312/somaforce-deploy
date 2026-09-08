@@ -53,7 +53,7 @@ def main() -> int:
     parser.add_argument("--motion", type=Path, default=None)
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--pose-timeout", type=float, default=5.0)
-    parser.add_argument("--residual-mode", choices=("off", "shadow", "c1"), default="off")
+    parser.add_argument("--residual-mode", choices=("off", "shadow", "c1", "c2"), default="off")
     parser.add_argument(
         "--residual",
         type=Path,
@@ -285,7 +285,7 @@ def main() -> int:
                             "nominal": "newest_to_oldest",
                             "executed": "newest_to_oldest",
                         },
-                        "authority": "C1_per_joint",
+                        "authority": f"{args.residual_mode.upper()}_per_joint",
                         "contact_ramp": {"attack": 0.1, "release": 0.1},
                         "safety": "joint_margin_then_velocity_margin",
                     },
