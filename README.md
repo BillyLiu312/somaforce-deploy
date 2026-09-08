@@ -172,3 +172,17 @@ Run one cycle by selecting `--task push_door_hand`, `--task push_box`, or
 its task motion and one push-box run moved the box about `2.00 m`; push-box has
 not yet been shown repeatable across launches. Large-box exported and ran end to
 end but still lost pelvis height after about three seconds, so it is not accepted.
+
+Render the two accepted demo trajectories with the task-aware renderer:
+
+```bash
+MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task push_door_hand \
+  --record outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory.npz \
+  --output outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory.mp4 \
+  --fps 500
+
+MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
+  --record outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory.npz \
+  --output outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory_hdmi_render.mp4 \
+  --fps 500
+```

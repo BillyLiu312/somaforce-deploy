@@ -250,3 +250,17 @@ cp ../HDMI/data/motion/g1/omomo/sub10_largebox_014/{motion.npz,meta.json} assets
 或 `--task move_largebox` 运行一个 cycle。截至 2026-09-08，door 和 box
 完成过一次任务动作；push-box 尚未证明跨多次启动可重复。large-box 已完成导出
 和启动，但约 3 秒后 pelvis 高度下降，因此尚未通过。
+
+使用 task-aware renderer 渲染两个已通过 demo：
+
+```bash
+MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task push_door_hand \
+  --record outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory.npz \
+  --output outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory.mp4 \
+  --fps 500
+
+MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
+  --record outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory.npz \
+  --output outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory_hdmi_render.mp4 \
+  --fps 500
+```
