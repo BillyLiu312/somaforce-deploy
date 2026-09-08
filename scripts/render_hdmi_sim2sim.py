@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -54,6 +55,14 @@ def main() -> int:
         if qpos.shape[1] != model.nq:
             raise ValueError(f"qpos shape {qpos.shape} does not match scene nq={model.nq}")
         data = mujoco.MjData(model)
+        if task.fixed_object_body is not None:
+            motion_dir = REPO_ROOT / task.motion_dir
+            motion = np.load(motion_dir / "motion.npz", allow_pickle=False)
+            meta = json.loads((motion_dir / "meta.json").read_text())
+            body_index = meta["body_names"].index(task.fixed_object_body)
+            body = model.body(task.fixed_object_body)
+            model.body_pos[body.id] = motion["body_pos_w"][0, body_index]
+            model.body_quat[body.id] = motion["body_quat_w"][0, body_index]
         pelvis_id = model.body("pelvis").id
         object_body_name = task.primary_object_body
         try:
