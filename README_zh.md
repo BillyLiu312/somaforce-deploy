@@ -256,8 +256,8 @@ cp ../HDMI/data/motion/g1/omomo/sub10_largebox_014/{motion.npz,meta.json} assets
 ```bash
 MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task push_door_hand \
   --record outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory.npz \
-  --output outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory_fixed_scene.mp4 \
-  --fps 500
+  --output outputs/hdmi_multitask_sim2sim_20260908/push_door_hand_v3_rubberhand_v2/trajectory_behind_robot.mp4 \
+  --fps 500 --camera-azimuth 270 --camera-elevation -12 --camera-distance 3.2 --follow-robot
 
 MUJOCO_GL=egl python scripts/render_hdmi_sim2sim.py --task move_suitcase \
   --record outputs/hdmi_tag_sim2sim_suitcase_repro_20260908_v8_checkpoint_aligned/trajectory.npz \

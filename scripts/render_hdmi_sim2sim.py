@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--camera-azimuth", type=float, default=135.0)
     parser.add_argument("--camera-elevation", type=float, default=-18.0)
     parser.add_argument("--camera-distance", type=float, default=None)
+    parser.add_argument("--follow-robot", action="store_true")
     args = parser.parse_args()
 
     record = np.load(args.record, allow_pickle=False)
@@ -98,6 +99,10 @@ def main() -> int:
                 if qvel is not None:
                     data.qvel[:] = qvel[index]
                 mujoco.mj_forward(model, data)
+                if args.follow_robot:
+                    target = 0.65 * data.xpos[pelvis_id] + 0.35 * data.xpos[object_id]
+                    target[2] = max(0.65, float(target[2]))
+                    camera.lookat[:] = target
                 renderer.update_scene(data, camera)
                 writer.append_data(renderer.render())
     print(f"saved HDMI sim2sim video: {args.output} frames={len(qpos)} fps={args.fps} task={args.task}")
