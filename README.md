@@ -149,3 +149,26 @@ unmodified tag `0.005` timing falls in the current local comparison, while the
 checkpoint-aligned `0.002` run completes the first suitcase move cycle. Neither
 result is hardware acceptance, and a band-enabled run must not be reported as
 unassisted locomotion stability.
+
+### Multi-task HDMI student sim2sim
+
+The same harness supports the locally trained `push_door_hand`, `push_box`, and
+`move_largebox` students. Prepare their exports and motion files from `HDMI`:
+
+```bash
+mkdir -p artifacts/hdmi_push_door_hand/hdmi_tag assets/mujoco/reference/hdmi_push_door_hand
+cp ../HDMI/scripts/exports/G1PushDoorHand/policy-4ta6gpm0-final.{onnx,yaml,json} artifacts/hdmi_push_door_hand/hdmi_tag/
+cp ../HDMI/data/motion/data_for_sim/push_door-hand-0828/{motion.npz,meta.json} assets/mujoco/reference/hdmi_push_door_hand/
+mkdir -p artifacts/hdmi_push_box/hdmi_tag assets/mujoco/reference/push_box
+cp ../HDMI/scripts/exports/G1PushBox/policy-3i8rdxsd-final.{onnx,yaml,json} artifacts/hdmi_push_box/hdmi_tag/
+cp ../HDMI/data/motion/g1/push_box/push_box-VID_20250423_220958-light-high-adjust_root_height/{motion.npz,meta.json} assets/mujoco/reference/push_box/
+mkdir -p artifacts/hdmi_move_largebox/hdmi_tag assets/mujoco/reference/hdmi_move_largebox
+cp ../HDMI/scripts/exports/G1MoveLargeboxOmni/policy-cnrls2ul-final.{onnx,yaml,json} artifacts/hdmi_move_largebox/hdmi_tag/
+cp ../HDMI/data/motion/g1/omomo/sub10_largebox_014/{motion.npz,meta.json} assets/mujoco/reference/hdmi_move_largebox/
+```
+
+Run one cycle by selecting `--task push_door_hand`, `--task push_box`, or
+`--task move_largebox` on both headless commands. On 2026-09-08, door completed
+its task motion and one push-box run moved the box about `2.00 m`; push-box has
+not yet been shown repeatable across launches. Large-box exported and ran end to
+end but still lost pelvis height after about three seconds, so it is not accepted.

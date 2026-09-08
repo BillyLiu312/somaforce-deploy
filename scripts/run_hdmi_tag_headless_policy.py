@@ -12,12 +12,15 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from somaforce_deploy.hdmi_sim2sim import TASKS, get_task, task_artifact_dir, task_motion_dir
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--task", choices=tuple(TASKS), default="move_suitcase")
     parser.add_argument(
         "--upstream-root", type=Path, default=REPO_ROOT.parent / "sim2real-hdmi-upstream"
     )
@@ -25,35 +28,42 @@ def main() -> int:
     parser.add_argument(
         "--policy-config",
         type=Path,
-        default=REPO_ROOT / "artifacts/hdmi_move_suitcase/hdmi_tag/policy.yaml",
+        default=None,
     )
     parser.add_argument(
         "--model",
         type=Path,
-        default=REPO_ROOT / "artifacts/hdmi_move_suitcase/hdmi_tag/student.onnx",
+        default=None,
     )
     parser.add_argument("--model-json", type=Path, default=None)
-    parser.add_argument("--steps", type=int, default=472)
+    parser.add_argument("--motion", type=Path, default=None)
+    parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--pose-timeout", type=float, default=5.0)
     args = parser.parse_args()
 
+    task = get_task(args.task)
     upstream_root = args.upstream_root.resolve()
     robot_config_path = args.robot_config or upstream_root / "config/robot/g1.yaml"
+    artifact_dir = task_artifact_dir(task, REPO_ROOT)
+    policy_config_path = args.policy_config or artifact_dir / "policy.yaml"
+    requested_model_path = args.model or artifact_dir / "student.onnx"
+    motion_path = args.motion or task_motion_dir(task, REPO_ROOT) / "motion.npz"
+    steps = task.policy_steps if args.steps is None else args.steps
     sys.path.insert(0, str(upstream_root))
     sys.path.insert(1, str(upstream_root / "rl_policy"))
     from rl_policy.tracking import Tracking
+    from utils.common import PORTS
 
     Tracking.start_key_listener = lambda _self: None
+    PORTS.update({f"{name}_pose": port for name, port in task.pose_ports})
     robot_config = yaml.safe_load(robot_config_path.read_text())
     robot_config["LOW_CMD_PORT"] = 5591
-    policy_config = yaml.safe_load(args.policy_config.read_text())
+    policy_config = yaml.safe_load(policy_config_path.read_text())
     for group in policy_config.get("observation", {}).values():
         for item in group.values():
             if isinstance(item, dict) and "motion_path" in item:
-                motion_path = Path(item["motion_path"])
-                if not motion_path.is_absolute():
-                    item["motion_path"] = str((REPO_ROOT / motion_path).resolve())
-    model_path = args.model.resolve()
+                item["motion_path"] = str(motion_path.resolve().parent)
+    model_path = requested_model_path.resolve()
     model_json = args.model_json.resolve() if args.model_json else model_path.with_suffix(".json")
     with tempfile.TemporaryDirectory(prefix="hdmi_tag_model_") as temp_dir:
         if not model_json.exists() and args.model_json is None:
@@ -86,7 +96,7 @@ def main() -> int:
         policy.use_policy_action = True
         policy.get_ready_state = False
         policy.reset()
-        for _ in range(int(args.steps)):
+        for _ in range(int(steps)):
             policy._rl_step_scheduled()
             time.sleep(policy.rl_dt)
     return 0

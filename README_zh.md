@@ -183,9 +183,7 @@ steps 触发 pelvis 高度保护。这说明当前主要是 MuJoCo 资产/动力
 headless harness 会从单独 checkout 的官方 HDMI tag 加载 policy 和 MuJoCo
 模块，本仓库不 vendor upstream 源码。harness 同时覆盖了官方 tag 的默认端口
 错误：`CommandSender` 使用 `55901`，MuJoCo bridge 使用 `5591`；本地统一为
-`5591`。push-box
-当前 tag-compatible free-root 运行仍会跌倒，不能称为稳定成功；suitcase
-student 已在 checkpoint 对齐参数下完成一个搬运周期，具体边界见下文。
+`5591`。suitcase、door 和 task-specific push-box scene 的结果见下文。
 使用的 upstream commit 是 `0007b02069a934324ec37b8e194e6a1c918e251b`。
 
 当前 HDMI tag harness 的默认任务是 upstream suitcase 设置。upstream scene
@@ -230,3 +228,25 @@ MUJOCO_GL=egl python scripts/render_push_box_mujoco.py --scene suitcase \
 gantry 外力。当前本地对照中，未修改的 tag `0.005` timing 会跌倒；与 checkpoint
 对齐的 `0.002` 可以完成第一个 suitcase 搬运周期。两者都不是硬件验收；全程
 开启 gantry 的结果也不能表述为无辅助 locomotion 稳定性。
+
+### 多任务 HDMI student sim2sim
+
+同一套 harness 支持本地训练的 `push_door_hand`、`push_box` 和
+`move_largebox` student。任务导出和 motion 文件从 `HDMI` 准备：
+
+```bash
+mkdir -p artifacts/hdmi_push_door_hand/hdmi_tag assets/mujoco/reference/hdmi_push_door_hand
+cp ../HDMI/scripts/exports/G1PushDoorHand/policy-4ta6gpm0-final.{onnx,yaml,json} artifacts/hdmi_push_door_hand/hdmi_tag/
+cp ../HDMI/data/motion/data_for_sim/push_door-hand-0828/{motion.npz,meta.json} assets/mujoco/reference/hdmi_push_door_hand/
+mkdir -p artifacts/hdmi_push_box/hdmi_tag assets/mujoco/reference/push_box
+cp ../HDMI/scripts/exports/G1PushBox/policy-3i8rdxsd-final.{onnx,yaml,json} artifacts/hdmi_push_box/hdmi_tag/
+cp ../HDMI/data/motion/g1/push_box/push_box-VID_20250423_220958-light-high-adjust_root_height/{motion.npz,meta.json} assets/mujoco/reference/push_box/
+mkdir -p artifacts/hdmi_move_largebox/hdmi_tag assets/mujoco/reference/hdmi_move_largebox
+cp ../HDMI/scripts/exports/G1MoveLargeboxOmni/policy-cnrls2ul-final.{onnx,yaml,json} artifacts/hdmi_move_largebox/hdmi_tag/
+cp ../HDMI/data/motion/g1/omomo/sub10_largebox_014/{motion.npz,meta.json} assets/mujoco/reference/hdmi_move_largebox/
+```
+
+在两个 headless 命令上分别增加 `--task push_door_hand`、`--task push_box`
+或 `--task move_largebox` 运行一个 cycle。截至 2026-09-08，door 和 box
+完成过一次任务动作；push-box 尚未证明跨多次启动可重复。large-box 已完成导出
+和启动，但约 3 秒后 pelvis 高度下降，因此尚未通过。
