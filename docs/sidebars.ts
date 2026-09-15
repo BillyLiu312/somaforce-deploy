@@ -63,6 +63,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'ros2-pose-adapter',
+          label: 'ROS2 Pose Adapter',
+        },
+        {
+          type: 'doc',
           id: 'tracking_framework',
           label: 'Tracking Framework',
         },

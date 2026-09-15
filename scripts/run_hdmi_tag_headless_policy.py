@@ -251,6 +251,14 @@ def main() -> int:
             if args.lockstep_port
             else None
         )
+        if lockstep is not None:
+            hold_position = np.asarray(
+                policy.state_processor.joint_pos, dtype=np.float32
+            ).copy()
+            zeros = np.zeros(policy.num_dofs, dtype=np.float32)
+            for _ in range(5):
+                policy.command_sender.send_command(hold_position, zeros, zeros)
+                time.sleep(0.02)
         for _ in range(int(steps)):
             policy._rl_step_scheduled()
             if lockstep is None:

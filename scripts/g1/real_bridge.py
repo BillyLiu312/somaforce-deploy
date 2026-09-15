@@ -3,6 +3,7 @@
 import sched
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict
 
 import numpy as np
@@ -39,19 +40,48 @@ UNITREE_DOMAIN_ID = 0
 class RealBridge:
     """Bridge Unitree SDK2 channels to the sim2real ZMQ interface."""
 
-    def __init__(self, robot_cfg: RobotCfg, rate_hz=200, interface: str = UNITREE_INTERFACE):
+    def __init__(
+        self,
+        robot_cfg: RobotCfg,
+        rate_hz=200,
+        interface: str = UNITREE_INTERFACE,
+        *,
+        read_only: bool = False,
+        wait_for_command: bool = True,
+        command_startup_timeout_s: float = 15.0,
+    ):
         self.robot_cfg = robot_cfg
         self.robot_name = robot_cfg.name
         self.rate_hz = rate_hz
         self.dt = 1.0 / rate_hz
         self.interface = interface
+        self.read_only = bool(read_only)
+        self.wait_for_command = bool(wait_for_command)
+        self.command_startup_timeout_s = float(command_startup_timeout_s)
+        self.low_state_count = 0
+        self.low_state_last_tick: int | None = None
+        self.low_cmd_unitree_pub = None
+        self.low_cmd_zmq_sub = None
+        self.low_cmd = None
+        self.msc = None
 
         self._init_unitree_channels()
         self._init_zmq()
-        self._init_low_cmd_template()
 
         self.has_received_command = False
+        if self.read_only:
+            logger.warning(
+                "READ-ONLY bridge: no rt/lowcmd publisher and no MotionSwitcher client"
+            )
+            return
 
+        self._init_low_cmd_template()
+        if not self.wait_for_command:
+            self._activate_control()
+
+    def _activate_control(self) -> None:
+        if self.msc is not None:
+            return
         self.msc = MotionSwitcherClient()
         self.msc.SetTimeout(5.0)
         self.msc.Init()
@@ -64,6 +94,75 @@ class RealBridge:
                 status, result = self.msc.CheckMode()
                 print(status, result)
                 time.sleep(1)
+
+    def _receive_low_cmd_message(self) -> LowCmdMessage | None:
+        latest = None
+        while True:
+            try:
+                data = self.low_cmd_zmq_sub.recv(flags=zmq.DONTWAIT)
+            except zmq.Again:
+                break
+            try:
+                candidate = LowCmdMessage.from_bytes(data)
+            except Exception as exc:
+                logger.warning(f"Failed to decode low command message: {exc}")
+                continue
+            if candidate.q_target.size != len(self.robot_cfg.joint_names):
+                logger.warning(
+                    "Received low command with unexpected size {}",
+                    candidate.q_target.size,
+                )
+                continue
+            latest = candidate
+        return latest
+
+    def _apply_low_cmd_message(self, low_cmd: LowCmdMessage) -> None:
+        arrays = (
+            low_cmd.q_target,
+            low_cmd.dq_target,
+            low_cmd.tau_ff,
+            low_cmd.kp,
+            low_cmd.kd,
+        )
+        if not all(np.isfinite(value).all() for value in arrays):
+            raise ValueError("low command contains non-finite values")
+        motor_cmd = self.low_cmd.motor_cmd
+        count = min(len(self.robot_cfg.joint_names), len(motor_cmd))
+        for i in range(count):
+            cmd: "MotorCmd_" = motor_cmd[i]
+            cmd.q = float(low_cmd.q_target[i])
+            cmd.dq = float(low_cmd.dq_target[i])
+            cmd.tau = float(low_cmd.tau_ff[i])
+            cmd.kp = float(low_cmd.kp[i])
+            cmd.kd = float(low_cmd.kd[i])
+        self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+        self.low_cmd_unitree_pub.Write(self.low_cmd)
+
+    def _wait_for_initial_command(self) -> LowCmdMessage:
+        if self.command_startup_timeout_s <= 0:
+            raise ValueError("command_startup_timeout_s must be positive")
+        logger.warning(
+            "Control is DISARMED; publishing low-state while waiting for a fresh local command"
+        )
+        deadline = time.monotonic() + self.command_startup_timeout_s
+        while time.monotonic() < deadline:
+            self._low_state_unitree_to_zmq()
+            command = self._receive_low_cmd_message()
+            if command is not None:
+                if command.source_time_ns is None:
+                    logger.warning("Ignoring initial command without source timestamp")
+                else:
+                    age_s = (time.monotonic_ns() - command.source_time_ns) / 1e9
+                    if 0.0 <= age_s <= 0.5:
+                        logger.info(
+                            "Fresh initial command received: sequence={} age={:.3f}s",
+                            command.sequence,
+                            age_s,
+                        )
+                        return command
+                    logger.warning("Ignoring stale initial command: age={:.3f}s", age_s)
+            time.sleep(self.dt)
+        raise RuntimeError("Timed out waiting for a fresh initial low command")
 
     def _init_unitree_channels(self):
         domain_id = UNITREE_DOMAIN_ID
@@ -80,9 +179,10 @@ class RealBridge:
 
             self.low_state_unitree_sub = ChannelSubscriber("rt/lowstate", LowState_go)
             self.low_state_unitree_sub.Init(handler=None, queueLen=0)
-            self.low_cmd_unitree_pub = ChannelPublisher("rt/lowcmd", LowCmd_go)
-            self.low_cmd_unitree_pub.Init()
-            self.low_cmd = unitree_go_msg_dds__LowCmd_()
+            if not self.read_only:
+                self.low_cmd_unitree_pub = ChannelPublisher("rt/lowcmd", LowCmd_go)
+                self.low_cmd_unitree_pub.Init()
+                self.low_cmd = unitree_go_msg_dds__LowCmd_()
         elif dds_family == "hg":
             from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_ as LowState_hg
             from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_ as LowCmd_hg
@@ -90,15 +190,16 @@ class RealBridge:
 
             self.low_state_unitree_sub = ChannelSubscriber("rt/lowstate", LowState_hg)
             self.low_state_unitree_sub.Init(handler=None, queueLen=0)
-            self.low_cmd_unitree_pub = ChannelPublisher("rt/lowcmd", LowCmd_hg)
-            self.low_cmd_unitree_pub.Init()
-            self.low_cmd = unitree_hg_msg_dds__LowCmd_()
+            if not self.read_only:
+                self.low_cmd_unitree_pub = ChannelPublisher("rt/lowcmd", LowCmd_hg)
+                self.low_cmd_unitree_pub.Init()
+                self.low_cmd = unitree_hg_msg_dds__LowCmd_()
         else:
             raise NotImplementedError(
                 f"Robot name {self.robot_name} is not supported for the real bridge."
             )
 
-        self.crc = CRC()
+        self.crc = None if self.read_only else CRC()
 
     def _init_zmq(self):
         self.zmq_context = zmq.Context.instance()
@@ -112,6 +213,8 @@ class RealBridge:
         self.low_state_zmq_pub.bind(low_state_endpoint)
 
         self.low_cmd_port = self.robot_cfg.low_cmd_port
+        if self.read_only:
+            return
         low_cmd_host = self.robot_cfg.low_cmd_host
         low_cmd_endpoint = f"tcp://{low_cmd_host}:{self.low_cmd_port}"
         self.low_cmd_zmq_sub: zmq.Socket = self.zmq_context.socket(zmq.SUB)
@@ -144,6 +247,14 @@ class RealBridge:
         with ScopedTimer("real_bridge.low_state") as total_timer:
             with ScopedTimer("real_bridge.low_state.read") as read_timer:
                 msg: LowState_hg | LowState_go = self.low_state_unitree_sub.Read()
+            if msg is None:
+                return {
+                    "total_s": read_timer.last_time,
+                    "read_s": read_timer.last_time,
+                    "pack_s": 0.0,
+                    "publish_s": 0.0,
+                }
+            with ScopedTimer("real_bridge.low_state.unpack"):
                 imu = msg.imu_state
                 motor_state = msg.motor_state
 
@@ -165,6 +276,8 @@ class RealBridge:
                     joint_torques=joint_tau,
                     tick=int(getattr(msg, "tick", 0)),
                 )
+                self.low_state_count += 1
+                self.low_state_last_tick = low_state_msg.tick
 
             with ScopedTimer("real_bridge.low_state.publish") as publish_timer:
                 try:
@@ -180,6 +293,15 @@ class RealBridge:
         }
 
     def _low_cmd_zmq_to_unitree(self) -> Dict[str, float]:
+        if self.read_only:
+            return {
+                "total_s": 0.0,
+                "recv_s": 0.0,
+                "decode_s": 0.0,
+                "apply_s": 0.0,
+                "publish_s": 0.0,
+                "command_count": 0,
+            }
         recv_s = 0.0
         decode_s = 0.0
         apply_s = 0.0
@@ -218,21 +340,9 @@ class RealBridge:
                     continue
 
                 with ScopedTimer("real_bridge.low_cmd.apply") as apply_timer:
-                    motor_cmd = self.low_cmd.motor_cmd
-                    count = min(len(self.robot_cfg.joint_names), len(motor_cmd))
-                    for i in range(count):
-                        cmd: "MotorCmd_" = motor_cmd[i]
-                        cmd.q = float(low_cmd.q_target[i])
-                        cmd.dq = float(low_cmd.dq_target[i])
-                        cmd.tau = float(low_cmd.tau_ff[i])
-                        cmd.kp = float(low_cmd.kp[i])
-                        cmd.kd = float(low_cmd.kd[i])
+                    self._apply_low_cmd_message(low_cmd)
                 apply_s += apply_timer.last_time
-
-                with ScopedTimer("real_bridge.low_cmd.publish") as publish_timer:
-                    self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-                    self.low_cmd_unitree_pub.Write(self.low_cmd)
-                publish_s += publish_timer.last_time
+                publish_s += apply_timer.last_time
 
                 updated = True
                 command_count += 1
@@ -249,23 +359,56 @@ class RealBridge:
             "command_count": command_count,
         }
 
-    def run(self):
-        logger.info(
-            "Real bridge running: Unitree <-> ZMQ (low_state pub on {}, low_cmd sub on {})",
-            self.low_state_port,
-            self.low_cmd_port,
-        )
+    def run(
+        self,
+        *,
+        duration_s: float | None = None,
+        ready_file: Path | None = None,
+    ):
+        if duration_s is not None and duration_s <= 0:
+            raise ValueError("duration_s must be positive")
+        if self.read_only:
+            logger.info(
+                "Read-only bridge running: Unitree low_state -> ZMQ port {}",
+                self.low_state_port,
+            )
+        else:
+            if self.wait_for_command:
+                initial_command = self._wait_for_initial_command()
+                self._activate_control()
+                self._apply_low_cmd_message(initial_command)
+                self.has_received_command = True
+            logger.info(
+                "Real bridge running: Unitree <-> ZMQ (low_state pub on {}, low_cmd sub on {})",
+                self.low_state_port,
+                self.low_cmd_port,
+            )
+        if ready_file is not None:
+            ready_file.write_text("ready\n")
 
         scheduler = sched.scheduler(time.perf_counter, time.sleep)
         next_run_time = time.perf_counter()
+        started_at = time.monotonic()
+        deadline = None if duration_s is None else started_at + duration_s
 
         try:
-            while True:
+            while deadline is None or time.monotonic() < deadline:
                 scheduler.enterabs(next_run_time, 1, self._step, ())
                 scheduler.run()
                 next_run_time += self.dt
         except KeyboardInterrupt:
             logger.info("Real bridge stopped.")
+        finally:
+            elapsed = max(time.monotonic() - started_at, 1e-9)
+            logger.info(
+                "Low-state summary: frames={} rate={:.1f} Hz last_tick={}",
+                self.low_state_count,
+                self.low_state_count / elapsed,
+                self.low_state_last_tick,
+            )
+
+        if self.read_only and self.low_state_count == 0:
+            raise RuntimeError("No Unitree low-state frames received")
 
     def _step(self):
         with ScopedTimer("real_bridge.step") as step_timer:
@@ -303,12 +446,24 @@ class Args:
     robot: str = "g1"
     rate: float = 100.0
     interface: str = UNITREE_INTERFACE
+    read_only: bool = False
+    wait_for_command: bool = True
+    command_startup_timeout: float = 15.0
+    duration: float | None = None
+    ready_file: Path | None = None
 
 
 def main(args: Args) -> None:
 
-    bridge = RealBridge(robot_cfg=get_robot_cfg(args.robot), rate_hz=args.rate, interface=args.interface)
-    bridge.run()
+    bridge = RealBridge(
+        robot_cfg=get_robot_cfg(args.robot),
+        rate_hz=args.rate,
+        interface=args.interface,
+        read_only=args.read_only,
+        wait_for_command=args.wait_for_command,
+        command_startup_timeout_s=args.command_startup_timeout,
+    )
+    bridge.run(duration_s=args.duration, ready_file=args.ready_file)
 
 
 if __name__ == "__main__":

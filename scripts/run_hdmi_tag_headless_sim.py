@@ -219,6 +219,17 @@ def main() -> int:
                 simulation.viewer.close()
                 return
             if lockstep is not None and pending_substeps == 0:
+                # Do not consume the first step request until the PUB/SUB low-command
+                # channel has completed its slow join. Otherwise a dropped first
+                # command leaves the policy waiting for a reply that cannot complete.
+                simulation.sim_bridge._poll_low_cmd()
+                if not simulation.sim_bridge.has_received_command:
+                    simulation.sim_bridge.publish_low_state()
+                    idle_steps += 1
+                    if idle_steps % int(args.residual_ft_decimation) == 0:
+                        publish_ft()
+                    time.sleep(simulation.sim_dt)
+                    return
                 if not lockstep.requested():
                     simulation.sim_bridge.publish_low_state()
                     idle_steps += 1
@@ -230,7 +241,8 @@ def main() -> int:
                 # The low command is published immediately before the request.
                 # Give the independent PUB/SUB socket one physics tick to deliver it.
                 time.sleep(simulation.sim_dt)
-            simulation.sim_bridge._poll_low_cmd()
+            else:
+                simulation.sim_bridge._poll_low_cmd()
             if not simulation.sim_bridge.has_received_command:
                 simulation.sim_bridge.publish_low_state()
                 idle_steps += 1

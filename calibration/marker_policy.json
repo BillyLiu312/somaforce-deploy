@@ -1,0 +1,24 @@
+{
+  "schema": "sim2real_marker_to_policy_v1",
+  "convention": "T_marker_body maps body/policy coordinates into the rigid-body marker frame",
+  "marker_from_torso": [
+    [1.0, 0.0, 0.0, -0.04],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, -0.4],
+    [0.0, 0.0, 0.0, 1.0]
+  ],
+  "marker_from_suitcase": [
+    [1.0, 0.0, 0.0, 0.09],
+    [0.0, 1.0, 0.0, -0.005],
+    [0.0, 0.0, 1.0, -0.4],
+    [0.0, 0.0, 0.0, 1.0]
+  ],
+  "calibration": {
+    "torso_origin_from_robot_rigid_m": [-0.04, 0.0, -0.4],
+    "torso_rotation_from_robot_rigid": "axes_parallel",
+    "suitcase_geom_center_from_policy_root_m": [-0.1, 0.0, 0.2],
+    "suitcase_rigid_origin_from_geom_center_m": [0.01, 0.005, 0.2],
+    "suitcase_rigid_origin_from_policy_root_m": [-0.09, 0.005, 0.4],
+    "suitcase_rotation_from_rigid": "axes_parallel"
+  }
+}

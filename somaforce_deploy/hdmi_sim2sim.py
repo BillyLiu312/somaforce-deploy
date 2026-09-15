@@ -48,7 +48,7 @@ TASKS = {
         primary_object_body="door_panel",
         primary_object_joint="door_joint",
         fixed_object_body="door",
-        object_xml="active_adaptation/assets_mjcf/objects/door/door.xml",
+        object_xml="upstream:data/objects/door/door.xml",
         injected_sensor_bodies=("door", "door_panel"),
     ),
     "push_box": HDMISim2SimTask(
