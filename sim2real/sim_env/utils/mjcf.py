@@ -27,6 +27,8 @@ VIEWER_ASSET_XML = """\
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
 """
 
+VIEWER_GROUND_XML = '    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>\n'
+
 VIEWER_WORLDBODY_XML = """\
     <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
@@ -43,12 +45,18 @@ def _inject_floor_scene_xml(xml_text: str) -> str:
     asset_close = xml_text.find("</asset>")
     if asset_close < 0:
         raise ValueError("Expected </asset> block in MJCF")
-    xml_text = xml_text[:asset_close] + VIEWER_ASSET_XML + xml_text[asset_close:]
+    if 'name="groundplane"' not in xml_text:
+        xml_text = xml_text[:asset_close] + VIEWER_ASSET_XML + xml_text[asset_close:]
 
     worldbody_close = xml_text.find("</worldbody>")
     if worldbody_close < 0:
         raise ValueError("Expected </worldbody> block in MJCF")
-    return xml_text[:worldbody_close] + VIEWER_WORLDBODY_XML + xml_text[worldbody_close:]
+    if 'name="floor"' in xml_text:
+        return xml_text
+    return xml_text[:worldbody_close] + VIEWER_WORLDBODY_XML.replace(
+        '    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>\n',
+        VIEWER_GROUND_XML,
+    ) + xml_text[worldbody_close:]
 
 
 @contextmanager
@@ -155,12 +163,17 @@ def ensure_joint_motor_actuators(
 def load_sim_model(
     robot_cfg: RobotCfg,
     *,
+    mjcf_path: str | Path | None = None,
     ground_rgb: tuple[float, float, float] = (0.2, 0.3, 0.4),
 ) -> mujoco.MjModel:
-    mjcf_path = robot_cfg.resolve_mjcf_path()
+    resolved_mjcf_path = (
+        Path(mjcf_path).expanduser().resolve()
+        if mjcf_path is not None
+        else robot_cfg.resolve_mjcf_path()
+    )
     if ground_rgb != (0.2, 0.3, 0.4):
         logger.warning("load_sim_model currently ignores non-default ground_rgb={}", ground_rgb)
-    with _temp_scene_with_floor(mjcf_path) as scene_mjcf_path:
+    with _temp_scene_with_floor(resolved_mjcf_path) as scene_mjcf_path:
         spec = mujoco.MjSpec.from_file(str(scene_mjcf_path))
         added_joint_names = ensure_joint_motor_actuators(spec, robot_cfg)
         if added_joint_names:

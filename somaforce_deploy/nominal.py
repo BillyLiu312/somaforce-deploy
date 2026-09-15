@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Mapping, Protocol
 import numpy as np
 from .contracts import *
+from .sonic import SONIC_ACTION_DIM, select_cross_action
 
 class InferenceModule(Protocol):
     def __call__(self, inputs: Mapping[str,np.ndarray]) -> Mapping[str,np.ndarray]: ...
@@ -65,7 +66,22 @@ class HDMIStudentTwoStageNominal(NominalPolicy):
 
 class SonicNominal(NominalPolicy):
     name="sonic"
-    def __init__(self,inference: InferenceModule,input_builder): self.inference=inference; self.input_builder=input_builder
+    def __init__(
+        self,
+        inference: InferenceModule,
+        input_builder,
+        *,
+        output_dim: int = SONIC_ACTION_DIM,
+    ):
+        if int(output_dim) not in {ACTION_DIM, SONIC_ACTION_DIM}:
+            raise ValueError("Sonic output_dim must be 23 or 29")
+        self.inference = inference
+        self.input_builder = input_builder
+        self.output_dim = int(output_dim)
+
     def step(self, *, command, policy, object_obs=None):
         out=self.inference(self.input_builder(command=command,policy=policy))
-        return require_array(out["action"],(1,ACTION_DIM),"Sonic action")
+        action = np.asarray(out["action"], dtype=np.float32)
+        if self.output_dim == SONIC_ACTION_DIM:
+            return select_cross_action(action)
+        return require_array(action, (1, ACTION_DIM), "Sonic action")

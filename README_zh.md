@@ -276,3 +276,38 @@ Residual 闭环使用独立 lockstep 诊断：sim 端增加
 arms=`0.18`、waist=`0.10`、legs=`0.08`。两个任务在 C1 和 C2 运行中都保持
 任务动作；这证明推理/组合/F-T 闭环接通，不证明统计收益或硬件就绪。本次样本中
 C2 suitcase 的 force p95 接近 C1，而 C2 door 的最大 force 低于 C1。
+
+### Sonic suitcase 迁移
+
+**路线状态：关闭。** 真实物理 scene 中的 nominal 运行虽然完成了 motion，但没有产生 wrist-to-suitcase 接触，因此任务交互没有迁移成功。Sonic nominal 仍是本体感知闭环的 motion tracker，其输入中没有 suitcase 状态或接触反馈。本实现仅保留为诊断性负结果；停止继续开发 Sonic + Cross residual，也不得将这条路线表述为 suitcase 任务成功。
+
+分支 `feature/sonic-suitcase-sim2sim` 增加了第一阶段 Sonic 迁移，复用已经
+稳定的 HDMI-tag suitcase motion 和 scene，并加载外部 Sonic G1 导出模型。
+Sonic contract 为官方双模型：encoder 输入 `obs_dict[1762]`，decoder 输入
+`obs_dict[994]`（64 维 token + 930 维 proprioception），输出 29 维 action；使用 50 Hz、10 帧历史以及
+`[0,5,10,15,20,25,30,35,40,45]` future steps（0.9 s lookahead）。启动
+进程前先检查 motion 与模型 contract：
+
+    PYTHONPATH=. python scripts/validate_sonic_motion_contract.py \
+      --task move_suitcase \
+      --sonic-encoder /absolute/path/sonic_hf/model_encoder.onnx \
+      --sonic-decoder /absolute/path/sonic_hf/model_decoder.onnx \
+      --output outputs/sonic_suitcase_contract/report.json
+
+不带 `--task` 时，检查器会审计当前保存的四个 task motion。当前 no-hand
+版本的 `push_box` 缺少 Sonic 所需的四个 wrist joint，因此会以非零退出码
+作为 conversion gate；这里不会偷偷 zero-fill 后宣称通过。
+
+双模型 suitcase runner 是 `scripts/run_sonic_suitcase_sim2sim.py`，需要显式
+提供匹配的 encoder 和 decoder。它复用本地 integrated MuJoCo runtime，不使用
+HDMI-tag 的单模型 runner：
+
+    python scripts/run_sonic_suitcase_sim2sim.py \
+      --encoder /absolute/path/sonic_hf/model_encoder.onnx \
+      --decoder /absolute/path/sonic_hf/model_decoder.onnx \
+      --policy-config configs/sonic/suitcase_g1.yaml \
+      --motion assets/mujoco/reference/hdmi_suitcase/motion.npz \
+      --output-dir outputs/sonic_suitcase_sim2sim
+
+当前 runner 仅用于复现已经关闭的 Sonic nominal 负结果；有意不实现 Sonic +
+Cross residual。Sonic 模型二进制不提交到本仓库。

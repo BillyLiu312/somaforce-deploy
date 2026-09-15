@@ -316,6 +316,31 @@ class IntegratedPolicyRuntime:
         return out
 
     def setup_policy(self, model_path: str) -> None:
+        if self.policy_config.get("sonic_encoder_model") and self.policy_config.get("sonic_decoder_model"):
+            from somaforce_deploy.sonic_split import SonicSplitRuntime
+
+            def resolve_model_path(value: str) -> str:
+                path = Path(value).expanduser()
+                if not path.is_absolute():
+                    path = Path(self.args.policy_config).resolve().parent / path
+                return str(path.resolve())
+
+            runtime_module = SonicSplitRuntime(
+                resolve_model_path(str(self.policy_config["sonic_encoder_model"])),
+                resolve_model_path(str(self.policy_config["sonic_decoder_model"])),
+            )
+            self.model_path = str(Path(runtime_module.decoder_path))
+
+            def policy(input_dict: dict[str, Any]):
+                output_dict = runtime_module(input_dict)
+                action = np.asarray(output_dict["action"], dtype=np.float32)
+                q_target = self.default_dof_angles.copy()
+                q_target[self.controlled_joint_indices] += action[0] * self.action_scale
+                return action[0], q_target, input_dict
+
+            self.policy = policy
+            return
+
         runtime_module = build_inference_module(model_path, self.inference_backend)
         runtime_label = self.inference_backend
         if self.inference_backend == "tensorrt":
@@ -706,6 +731,7 @@ class IntegratedSimRuntime:
         sim_dt: float,
         headless: bool,
         key_callback: Callable[[int], None] | None,
+        mjcf_path: str | None = None,
     ):
         self.robot_cfg = robot_cfg
         self.sim_dt = float(sim_dt)
@@ -713,7 +739,7 @@ class IntegratedSimRuntime:
         self._external_key_callback = key_callback
         self._stop_event = Event()
 
-        self.mj_model = load_sim_model(self.robot_cfg)
+        self.mj_model = load_sim_model(self.robot_cfg, mjcf_path=mjcf_path)
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mj_model.opt.timestep = self.sim_dt
 
@@ -912,6 +938,7 @@ class IntegratedSim2Sim:
             sim_dt=args.sim_dt,
             headless=args.headless,
             key_callback=self._on_mujoco_key if not args.headless else None,
+            mjcf_path=args.mjcf_path,
         )
         self.root_trajectory: list[dict[str, np.ndarray | float | int]] = []
         self.trajectory: list[dict[str, np.ndarray | float | int]] = []
@@ -975,6 +1002,24 @@ class IntegratedSim2Sim:
             motion_idx = motion_joint_names.index(joint_name)
             self.sim.mj_data.qpos[qpos_addr] = motion_data.joint_pos[0, 0, motion_idx]
             self.sim.mj_data.qvel[qvel_addr] = 0.0
+
+        mujoco.mj_forward(self.sim.mj_model, self.sim.mj_data)
+
+        object_joint_name = self.policy.policy_config.get("object_joint_name")
+        object_motion_body_name = self.policy.policy_config.get("object_motion_body_name")
+        if object_joint_name and object_motion_body_name:
+            if object_motion_body_name not in state_processor.motion_body_names:
+                raise ValueError(f"Motion is missing object body {object_motion_body_name!r}")
+            object_joint = self.sim.mj_model.joint(str(object_joint_name))
+            object_body_idx = state_processor.motion_body_names.index(str(object_motion_body_name))
+            object_qpos = int(self.sim.mj_model.jnt_qposadr[object_joint.id])
+            object_qvel = int(self.sim.mj_model.jnt_dofadr[object_joint.id])
+            if int(self.sim.mj_model.jnt_type[object_joint.id]) != int(mujoco.mjtJoint.mjJNT_FREE):
+                raise ValueError(f"Configured object joint {object_joint_name!r} must be a free joint")
+            self.sim.mj_data.qpos[object_qpos : object_qpos + 3] = motion_data.body_pos_w[0, 0, object_body_idx]
+            self.sim.mj_data.qpos[object_qpos + 3 : object_qpos + 7] = motion_data.body_quat_w[0, 0, object_body_idx]
+            self.sim.mj_data.qvel[object_qvel : object_qvel + 3] = motion_data.body_lin_vel_w[0, 0, object_body_idx]
+            self.sim.mj_data.qvel[object_qvel + 3 : object_qvel + 6] = motion_data.body_ang_vel_w[0, 0, object_body_idx]
 
         mujoco.mj_forward(self.sim.mj_model, self.sim.mj_data)
         self.sim.sync_viewer()
@@ -1208,6 +1253,8 @@ class IntegratedSim2Sim:
             ).copy(),
             "motion_root_pos_w": motion_root_pos,
             "motion_root_quat_w": motion_root_quat,
+            "qpos": np.asarray(self.sim.mj_data.qpos, dtype=np.float32).copy(),
+            "qvel": np.asarray(self.sim.mj_data.qvel, dtype=np.float32).copy(),
         }
         if self.args.root_trajectory_output is not None:
             self.root_trajectory.append(root_frame)
@@ -1376,6 +1423,8 @@ class IntegratedSim2Sim:
                 [frame["motion_body_quat_w"] for frame in self.trajectory],
                 axis=0,
             ),
+            qpos=np.stack([frame["qpos"] for frame in self.trajectory], axis=0),
+            qvel=np.stack([frame["qvel"] for frame in self.trajectory], axis=0),
             body_names=np.asarray(self._trajectory_body_names),
             sim_time=np.asarray(
                 [frame["sim_time"] for frame in self.trajectory],
@@ -1478,6 +1527,7 @@ class IntegratedSim2SimArgs:
     robot: str = "g1"
     env_dt: float = 0.02
     sim_dt: float = 0.005
+    mjcf_path: str | None = None
     initial_pause_s: float = 5.0
     inference_backend: Literal["onnx-gpu", "onnx-cpu", "tensorrt"] = "onnx-cpu"
     headless: bool = False

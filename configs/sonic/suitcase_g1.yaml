@@ -1,0 +1,265 @@
+# Sonic G1 release policy configuration for the local split-model suitcase harness.
+# Keep the ONNX checkpoint outside Git and replace model_path at invocation time
+# with --model. This file deliberately contains no checkpoint binary.
+model_path: /absolute/path/sonic_hf/model_decoder.onnx
+sonic_encoder_model: /absolute/path/sonic_hf/model_encoder.onnx
+sonic_decoder_model: /absolute/path/sonic_hf/model_decoder.onnx
+
+joint_names_simulation:
+  - left_hip_pitch_joint
+  - left_hip_roll_joint
+  - left_hip_yaw_joint
+  - left_knee_joint
+  - left_ankle_pitch_joint
+  - left_ankle_roll_joint
+  - right_hip_pitch_joint
+  - right_hip_roll_joint
+  - right_hip_yaw_joint
+  - right_knee_joint
+  - right_ankle_pitch_joint
+  - right_ankle_roll_joint
+  - waist_yaw_joint
+  - waist_roll_joint
+  - waist_pitch_joint
+  - left_shoulder_pitch_joint
+  - left_shoulder_roll_joint
+  - left_shoulder_yaw_joint
+  - left_elbow_joint
+  - left_wrist_roll_joint
+  - left_wrist_pitch_joint
+  - left_wrist_yaw_joint
+  - right_shoulder_pitch_joint
+  - right_shoulder_roll_joint
+  - right_shoulder_yaw_joint
+  - right_elbow_joint
+  - right_wrist_roll_joint
+  - right_wrist_pitch_joint
+  - right_wrist_yaw_joint
+
+body_names_simulation:
+  - pelvis
+  - left_hip_pitch_link
+  - left_hip_roll_link
+  - left_hip_yaw_link
+  - left_knee_link
+  - left_ankle_pitch_link
+  - left_ankle_roll_link
+  - right_hip_pitch_link
+  - right_hip_roll_link
+  - right_hip_yaw_link
+  - right_knee_link
+  - right_ankle_pitch_link
+  - right_ankle_roll_link
+  - waist_yaw_link
+  - waist_roll_link
+  - torso_link
+  - left_shoulder_pitch_link
+  - left_shoulder_roll_link
+  - left_shoulder_yaw_link
+  - left_elbow_link
+  - left_wrist_roll_link
+  - left_wrist_pitch_link
+  - left_wrist_yaw_link
+  - right_shoulder_pitch_link
+  - right_shoulder_roll_link
+  - right_shoulder_yaw_link
+  - right_elbow_link
+  - right_wrist_roll_link
+  - right_wrist_pitch_link
+  - right_wrist_yaw_link
+
+policy_joint_names:
+  - left_hip_pitch_joint
+  - right_hip_pitch_joint
+  - waist_yaw_joint
+  - left_hip_roll_joint
+  - right_hip_roll_joint
+  - waist_roll_joint
+  - left_hip_yaw_joint
+  - right_hip_yaw_joint
+  - waist_pitch_joint
+  - left_knee_joint
+  - right_knee_joint
+  - left_shoulder_pitch_joint
+  - right_shoulder_pitch_joint
+  - left_ankle_pitch_joint
+  - right_ankle_pitch_joint
+  - left_shoulder_roll_joint
+  - right_shoulder_roll_joint
+  - left_ankle_roll_joint
+  - right_ankle_roll_joint
+  - left_shoulder_yaw_joint
+  - right_shoulder_yaw_joint
+  - left_elbow_joint
+  - right_elbow_joint
+  - left_wrist_roll_joint
+  - right_wrist_roll_joint
+  - left_wrist_pitch_joint
+  - right_wrist_pitch_joint
+  - left_wrist_yaw_joint
+  - right_wrist_yaw_joint
+
+isaac_joint_names:
+  - left_hip_pitch_joint
+  - right_hip_pitch_joint
+  - waist_yaw_joint
+  - left_hip_roll_joint
+  - right_hip_roll_joint
+  - waist_roll_joint
+  - left_hip_yaw_joint
+  - right_hip_yaw_joint
+  - waist_pitch_joint
+  - left_knee_joint
+  - right_knee_joint
+  - left_shoulder_pitch_joint
+  - right_shoulder_pitch_joint
+  - left_ankle_pitch_joint
+  - right_ankle_pitch_joint
+  - left_shoulder_roll_joint
+  - right_shoulder_roll_joint
+  - left_ankle_roll_joint
+  - right_ankle_roll_joint
+  - left_shoulder_yaw_joint
+  - right_shoulder_yaw_joint
+  - left_elbow_joint
+  - right_elbow_joint
+  - left_wrist_roll_joint
+  - right_wrist_roll_joint
+  - left_wrist_pitch_joint
+  - right_wrist_pitch_joint
+  - left_wrist_yaw_joint
+  - right_wrist_yaw_joint
+
+# Sonic model-12 action scaling derived from the official actuator effort /
+# stiffness contract (0.25 * effort_limit / stiffness).
+action_scale:
+  ".*_hip_pitch_joint": 0.35066147
+  ".*_hip_roll_joint": 0.35066147
+  ".*_hip_yaw_joint": 0.54754647
+  ".*_knee_joint": 0.35066147
+  ".*_ankle_pitch_joint": 0.43857731
+  ".*_ankle_roll_joint": 0.43857731
+  waist_yaw_joint: 0.54754647
+  waist_roll_joint: 0.43857731
+  waist_pitch_joint: 0.43857731
+  ".*_shoulder_pitch_joint": 0.43857731
+  ".*_shoulder_roll_joint": 0.43857731
+  ".*_shoulder_yaw_joint": 0.43857731
+  ".*_elbow_joint": 0.43857731
+  ".*_wrist_roll_joint": 0.43857731
+  ".*_wrist_pitch_joint": 0.07450087
+  ".*_wrist_yaw_joint": 0.07450087
+
+default_joint_pos:
+  left_hip_pitch_joint: -0.1
+  left_hip_roll_joint: 0.0
+  left_hip_yaw_joint: 0.0
+  left_knee_joint: 0.3
+  left_ankle_pitch_joint: -0.2
+  left_ankle_roll_joint: 0.0
+  right_hip_pitch_joint: -0.1
+  right_hip_roll_joint: 0.0
+  right_hip_yaw_joint: 0.0
+  right_knee_joint: 0.3
+  right_ankle_pitch_joint: -0.2
+  right_ankle_roll_joint: 0.0
+  waist_yaw_joint: 0.0
+  waist_roll_joint: 0.0
+  waist_pitch_joint: 0.0
+  left_shoulder_pitch_joint: 0.0
+  left_shoulder_roll_joint: 0.0
+  left_shoulder_yaw_joint: 0.0
+  left_elbow_joint: 0.0
+  left_wrist_roll_joint: 0.0
+  left_wrist_pitch_joint: 0.0
+  left_wrist_yaw_joint: 0.0
+  right_shoulder_pitch_joint: 0.0
+  right_shoulder_roll_joint: 0.0
+  right_shoulder_yaw_joint: 0.0
+  right_elbow_joint: 0.0
+  right_wrist_roll_joint: 0.0
+  right_wrist_pitch_joint: 0.0
+  right_wrist_yaw_joint: 0.0
+
+joint_kp:
+  ".*_hip_pitch_joint": 99.09843
+  ".*_hip_roll_joint": 99.09843
+  ".*_hip_yaw_joint": 40.17924
+  ".*_knee_joint": 99.09843
+  ".*_ankle_pitch_joint": 28.50125
+  ".*_ankle_roll_joint": 28.50125
+  waist_yaw_joint: 40.17924
+  waist_roll_joint: 28.50125
+  waist_pitch_joint: 28.50125
+  ".*_shoulder_pitch_joint": 14.25062
+  ".*_shoulder_roll_joint": 14.25062
+  ".*_shoulder_yaw_joint": 14.25062
+  ".*_elbow_joint": 14.25062
+  ".*_wrist_roll_joint": 14.25062
+  ".*_wrist_pitch_joint": 16.77833
+  ".*_wrist_yaw_joint": 16.77833
+
+joint_kd:
+  ".*_hip_pitch_joint": 6.30880
+  ".*_hip_roll_joint": 6.30880
+  ".*_hip_yaw_joint": 2.55789
+  ".*_knee_joint": 6.30880
+  ".*_ankle_pitch_joint": 1.81445
+  ".*_ankle_roll_joint": 1.81445
+  waist_yaw_joint: 2.55789
+  waist_roll_joint: 1.81445
+  waist_pitch_joint: 1.81445
+  ".*_shoulder_pitch_joint": 0.90722
+  ".*_shoulder_roll_joint": 0.90722
+  ".*_shoulder_yaw_joint": 0.90722
+  ".*_elbow_joint": 0.90722
+  ".*_wrist_roll_joint": 0.90722
+  ".*_wrist_pitch_joint": 1.06814
+  ".*_wrist_yaw_joint": 1.06814
+
+motion:
+  motion_backend: npz
+  motion_path: assets/mujoco/reference/hdmi_suitcase/motion.npz
+  motion_dt_s: 0.02
+  future_steps: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45]
+  joint_names:
+    - left_hip_pitch_joint
+    - left_hip_roll_joint
+    - left_hip_yaw_joint
+    - left_knee_joint
+    - left_ankle_pitch_joint
+    - left_ankle_roll_joint
+    - right_hip_pitch_joint
+    - right_hip_roll_joint
+    - right_hip_yaw_joint
+    - right_knee_joint
+    - right_ankle_pitch_joint
+    - right_ankle_roll_joint
+    - waist_yaw_joint
+    - waist_roll_joint
+    - waist_pitch_joint
+    - left_shoulder_pitch_joint
+    - left_shoulder_roll_joint
+    - left_shoulder_yaw_joint
+    - left_elbow_joint
+    - left_wrist_roll_joint
+    - left_wrist_pitch_joint
+    - left_wrist_yaw_joint
+    - right_shoulder_pitch_joint
+    - right_shoulder_roll_joint
+    - right_shoulder_yaw_joint
+    - right_elbow_joint
+    - right_wrist_roll_joint
+    - right_wrist_pitch_joint
+    - right_wrist_yaw_joint
+  body_names: [pelvis]
+  root_body_name: pelvis
+  anchor_body_name: pelvis
+
+observation:
+  g1_input:
+    official:
+      _target_: sonic.sonic_official_g1_input
+  proprioception:
+    official:
+      _target_: sonic.sonic_official_proprioception

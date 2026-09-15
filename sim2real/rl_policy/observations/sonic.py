@@ -475,3 +475,158 @@ class sonic_prev_actions_history(_SonicHistoryObservation, namespace="sonic"):
 
     def compute(self) -> np.ndarray:
         return self._history_flat()
+
+
+class _OfficialSonicG1Builder:
+    """Build the exact split ONNX vectors used by the official G1 deployer."""
+
+    SONIC_ACTION_NAMES = (
+        "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+        "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+        "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+        "left_knee_joint", "right_knee_joint", "left_shoulder_pitch_joint",
+        "right_shoulder_pitch_joint", "left_ankle_pitch_joint", "right_ankle_pitch_joint",
+        "left_shoulder_roll_joint", "right_shoulder_roll_joint", "left_ankle_roll_joint",
+        "right_ankle_roll_joint", "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+        "left_elbow_joint", "right_elbow_joint", "left_wrist_roll_joint",
+        "right_wrist_roll_joint", "left_wrist_pitch_joint", "right_wrist_pitch_joint",
+        "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+    )
+    LOWER_INDICES = (0, 3, 6, 9, 13, 17, 1, 4, 7, 10, 14, 18)
+    WRIST_INDICES = (23, 24, 25, 26, 27, 28)
+    FUTURE_STEPS = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45)
+
+    def __init__(self, env):
+        self.env = env
+        self.initialized = False
+        self.history_ang = np.zeros((10, 3), dtype=np.float32)
+        self.history_pos = np.zeros((10, 29), dtype=np.float32)
+        self.history_vel = np.zeros((10, 29), dtype=np.float32)
+        self.history_actions = np.zeros((10, 29), dtype=np.float32)
+        self.history_gravity = np.zeros((10, 3), dtype=np.float32)
+
+    def reset(self) -> None:
+        self.initialized = False
+        for value in (self.history_ang, self.history_pos, self.history_vel, self.history_actions, self.history_gravity):
+            value[:] = 0.0
+
+    @staticmethod
+    def _append(history: np.ndarray, value: np.ndarray) -> None:
+        history[:-1] = history[1:]
+        history[-1] = value
+
+    def update(self) -> None:
+        state = self.env.state_processor
+        names = tuple(state.joint_names)
+        indices = [names.index(name) for name in self.SONIC_ACTION_NAMES]
+        joint_pos = np.asarray(state.joint_pos, dtype=np.float32)[indices]
+        joint_vel = np.asarray(state.joint_vel, dtype=np.float32)[indices]
+        root_ang = np.asarray(state.root_ang_vel_b, dtype=np.float32)
+        gravity = quat_rotate_inverse_numpy(
+            np.asarray(state.root_quat_w, dtype=np.float32).reshape(1, 4),
+            np.asarray([[0.0, 0.0, -1.0]], dtype=np.float32),
+        )[0]
+        action = np.asarray(self.env.state_dict.get("action", np.zeros(29)), dtype=np.float32).reshape(-1)
+        if action.size != 29:
+            action = np.zeros(29, dtype=np.float32)
+        if not self.initialized:
+            self.history_ang[:] = root_ang
+            self.history_pos[:] = joint_pos
+            self.history_vel[:] = joint_vel
+            self.history_actions[:] = action
+            self.history_gravity[:] = gravity
+            self.initialized = True
+            return
+        self._append(self.history_ang, root_ang)
+        self._append(self.history_pos, joint_pos)
+        self._append(self.history_vel, joint_vel)
+        self._append(self.history_actions, action)
+        self._append(self.history_gravity, gravity)
+
+    def _motion_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        motion = self.env.motion_data
+        if motion is None:
+            raise ValueError("Sonic observations require motion_data")
+        motion_names = tuple(self.env.motion_joint_names)
+        joint_indices = [motion_names.index(name) for name in self.SONIC_ACTION_NAMES]
+        positions = np.asarray(motion.joint_pos[0], dtype=np.float32)[:, joint_indices]
+        velocities = np.asarray(motion.joint_vel[0], dtype=np.float32)[:, joint_indices]
+        body_names = tuple(self.env.motion_body_names)
+        root_idx = body_names.index("pelvis")
+        root_pos = np.asarray(motion.body_pos_w[0, :, root_idx], dtype=np.float32)
+        root_quat = np.asarray(motion.body_quat_w[0, :, root_idx], dtype=np.float32)
+        return positions, velocities, root_pos, root_quat
+
+    def encoder(self) -> np.ndarray:
+        positions, velocities, root_pos, root_quat = self._motion_arrays()
+        state = self.env.state_processor
+        robot_quat = np.asarray(state.root_quat_w, dtype=np.float32).reshape(1, 4)
+        future = np.asarray(self.FUTURE_STEPS, dtype=int)
+        pos5 = positions[future]
+        vel5 = velocities[future]
+        root_z5 = root_pos[future, 2]
+        rel5 = quat_mul(np.broadcast_to(quat_conjugate(robot_quat), root_quat[future].shape), root_quat[future])
+        ori5 = matrix_from_quat(rel5)[..., :, :2].reshape(-1)
+        current_rel = quat_mul(quat_conjugate(robot_quat), root_quat[:1])
+        current_ori = matrix_from_quat(current_rel)[..., :, :2].reshape(-1)
+        wrist = positions[:10, self.WRIST_INDICES].reshape(-1)
+        lower_pos = pos5[:, self.LOWER_INDICES].reshape(-1)
+        lower_vel = vel5[:, self.LOWER_INDICES].reshape(-1)
+        zeros = np.zeros(9 + 12 + 720 + 60, dtype=np.float32)
+        out = np.concatenate(
+            (
+                np.asarray([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                pos5.reshape(-1), vel5.reshape(-1), root_z5,
+                np.asarray([root_pos[0, 2]], dtype=np.float32), current_ori,
+                ori5, lower_pos, lower_vel, zeros[:21],
+                zeros[21:], wrist,
+            )
+        ).astype(np.float32)
+        if out.shape != (1762,):
+            raise RuntimeError(f"Sonic encoder vector has shape {out.shape}, expected (1762,)")
+        return out
+
+    def proprioception(self) -> np.ndarray:
+        out = np.concatenate(
+            (
+                self.history_ang.reshape(-1), self.history_pos.reshape(-1),
+                self.history_vel.reshape(-1), self.history_actions.reshape(-1),
+                self.history_gravity.reshape(-1),
+            )
+        ).astype(np.float32)
+        if out.shape != (930,):
+            raise RuntimeError(f"Sonic proprioception vector has shape {out.shape}, expected (930,)")
+        return out
+
+
+class sonic_official_g1_input(Observation, namespace="sonic"):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.builder = getattr(self.env, "_sonic_official_builder", None)
+        if self.builder is None:
+            self.builder = _OfficialSonicG1Builder(self.env)
+            self.env._sonic_official_builder = self.builder
+
+    def reset(self) -> None:
+        self.builder.reset()
+
+    def update(self, data: Dict[str, Any]) -> None:
+        self.builder.update()
+
+    def compute(self) -> np.ndarray:
+        return self.builder.encoder()[None, :]
+
+
+class sonic_official_proprioception(Observation, namespace="sonic"):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.builder = getattr(self.env, "_sonic_official_builder", None)
+        if self.builder is None:
+            self.builder = _OfficialSonicG1Builder(self.env)
+            self.env._sonic_official_builder = self.builder
+
+    def reset(self) -> None:
+        self.builder.reset()
+
+    def compute(self) -> np.ndarray:
+        return self.builder.proprioception()[None, :]

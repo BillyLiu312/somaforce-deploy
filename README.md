@@ -200,3 +200,41 @@ The paired evidence is recorded in
 and C2 runs; this verifies the inference/composition/F-T loop but does not
 establish statistical benefit or hardware readiness. In this sample, C2 suitcase
 force p95 was near C1, while C2 door max force was lower than C1.
+
+### Sonic suitcase migration
+
+**Route status: closed.** The physical-scene nominal run completed the motion but produced no wrist-to-suitcase contact, so the task interaction did not transfer. Sonic remains a proprioceptive motion tracker without suitcase state or contact feedback in its nominal input. This implementation is retained as a diagnostic negative result; Sonic plus Cross residual development is stopped and this route must not be reported as suitcase task success.
+
+The branch `feature/sonic-suitcase-sim2sim` adds the first Sonic migration
+target. It reuses the already stable HDMI-tag suitcase motion and scene, but
+loads the official split Sonic G1 export with encoder input `obs_dict[1762]`,
+decoder input `obs_dict[994]` (64-D token + 930-D proprioception), and 29-D
+action output. Sonic uses ten history
+frames and future steps `[0,5,10,15,20,25,30,35,40,45]` at 50 Hz (0.9 s
+lookahead). Run the contract check before starting either process:
+
+    PYTHONPATH=. python scripts/validate_sonic_motion_contract.py \
+      --task move_suitcase \
+      --sonic-encoder /absolute/path/sonic_hf/model_encoder.onnx \
+      --sonic-decoder /absolute/path/sonic_hf/model_decoder.onnx \
+      --output outputs/sonic_suitcase_contract/report.json
+
+Without `--task`, the checker audits all four stored task motions. It exits
+non-zero for the current no-hand `push_box` motion because that asset is missing
+four Sonic wrist joints; this is an intentional conversion gate, not a
+zero-fill acceptance result.
+
+The split-model suitcase runner is `scripts/run_sonic_suitcase_sim2sim.py`; it
+must be given the matching encoder and decoder. It reuses the local integrated
+MuJoCo runtime rather than the HDMI-tag single-graph runner:
+
+    python scripts/run_sonic_suitcase_sim2sim.py \
+      --encoder /absolute/path/sonic_hf/model_encoder.onnx \
+      --decoder /absolute/path/sonic_hf/model_decoder.onnx \
+      --policy-config configs/sonic/suitcase_g1.yaml \
+      --motion assets/mujoco/reference/hdmi_suitcase/motion.npz \
+      --output-dir outputs/sonic_suitcase_sim2sim
+
+This runner is retained only to reproduce the closed Sonic nominal negative
+result. Sonic plus Cross residual is intentionally not implemented. No Sonic
+model binary is checked into this repository.
