@@ -1,0 +1,56 @@
+schema: somaforce_ft_calibration_v1
+# Deliberately invalid until both sides have been measured and reviewed.
+valid: false
+validation_scope: unvalidated
+# Set true only when the SDK/raw stream has already removed distal-load gravity.
+upstream_distal_load_compensated: false
+
+sides:
+  left:
+    # Decimal HPS device ID. Do not identify sides by ttyUSB enumeration.
+    device_id: 0
+    # Use -1 only if the sensor reports the reaction wrench rather than the
+    # object-on-robot wrench used during training.
+    measurement_sign: 1
+    # [Fx, Fy, Fz, Mx, My, Mz] in N and Nm, measured after thermal warm-up.
+    bias_sensor: [0, 0, 0, 0, 0, 0]
+    # T_wrist_sensor: maps sensor-frame coordinates into wrist_yaw_link.
+    # Translation is the sensor origin expressed from the wrist body origin.
+    wrist_from_sensor:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 0]
+      - [0, 0, 1, 0]
+      - [0, 0, 0, 1]
+    force_limit_N: 500
+    moment_limit_Nm: 50
+    gravity_compensation:
+      enabled: false
+      mass_kg: 0
+      com_sensor_m: [0, 0, 0]
+
+  right:
+    device_id: 0
+    measurement_sign: 1
+    bias_sensor: [0, 0, 0, 0, 0, 0]
+    wrist_from_sensor:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 0]
+      - [0, 0, 1, 0]
+      - [0, 0, 0, 1]
+    force_limit_N: 500
+    moment_limit_Nm: 50
+    gravity_compensation:
+      enabled: false
+      mass_kg: 0
+      com_sensor_m: [0, 0, 0]
+
+token:
+  require_runtime_tare: false
+  force_scale_N: 100
+  moment_scale_Nm: 10
+  stale_timeout_s: 0.10
+  robot_state_timeout_s: 0.10
+  contact_on_threshold: 0.05
+  contact_off_threshold: 0.025
+  probability_temperature: 0.02
+  smoothing_alpha: 0.5

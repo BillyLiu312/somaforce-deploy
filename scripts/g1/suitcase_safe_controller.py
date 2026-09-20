@@ -198,7 +198,7 @@ class GuardedNominalPilot:
 
 
 class SafePoseStateMachine:
-    """Generate targets while preserving a latched hold fallback."""
+    """Generate targets and enter a latched fail-safe hold after an abort."""
 
     MODES = frozenset({"zero", "hold", "init", "pilot"})
 

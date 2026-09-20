@@ -22,6 +22,17 @@ STREAMS = {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=float, default=3.0)
+    parser.add_argument(
+        "--allow-missing",
+        action="append",
+        choices=tuple(STREAMS),
+        default=[],
+        metavar="STREAM",
+        help=(
+            "do not fail when this stream receives no frames; may be repeated "
+            "(invalid frames still fail validation)"
+        ),
+    )
     args = parser.parse_args()
     if args.duration <= 0:
         raise ValueError("duration must be positive")
@@ -45,11 +56,12 @@ def main() -> int:
             latest[name] = STREAMS[name][1](socket.recv())
             received[name].append(time.monotonic())
 
+    allowed_missing = set(args.allow_missing)
     failures = []
     for name, times in received.items():
         rate = 0.0 if len(times) < 2 else (len(times) - 1) / (times[-1] - times[0])
         print(f"{name}: frames={len(times)} rate={rate:.1f}Hz")
-        if not times:
+        if not times and name not in allowed_missing:
             failures.append(f"missing {name}")
     for name in ("pelvis", "suitcase"):
         if name not in latest:

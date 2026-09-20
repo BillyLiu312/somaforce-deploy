@@ -1,0 +1,414 @@
+{
+  "schema": "sim2real_marker_to_policy_v2",
+  "valid": true,
+  "convention": "T_marker_target maps target/policy coordinates into each marker frame",
+  "marker_from_torso": [
+    [
+      0.3094105493413714,
+      -0.9499601284131296,
+      0.042905318802931275,
+      0.06118611242473341
+    ],
+    [
+      0.9457015072015889,
+      0.31212068742020155,
+      0.09071568641080882,
+      0.11832660478795544
+    ],
+    [
+      -0.09956792271065096,
+      0.012507234292648849,
+      0.9949521585772025,
+      -0.4901081452538054
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "marker_from_suitcase": [
+    [
+      0.215177531,
+      -0.976574949,
+      0.0,
+      0.040023021
+    ],
+    [
+      0.976574949,
+      0.215177531,
+      0.0,
+      0.18164294
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      -0.4075
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "marker_sources": {
+    "torso": [
+      {
+        "name": "robot1",
+        "topic": "/robot1/pose",
+        "marker_from_target": [
+          [
+            0.3094105493413714,
+            -0.9499601284131296,
+            0.042905318802931275,
+            0.06118611242473341
+          ],
+          [
+            0.9457015072015889,
+            0.31212068742020155,
+            0.09071568641080882,
+            0.11832660478795544
+          ],
+          [
+            -0.09956792271065096,
+            0.012507234292648849,
+            0.9949521585772025,
+            -0.4901081452538054
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "robot2",
+        "topic": "/robot2/pose",
+        "marker_from_target": [
+          [
+            0.5954071179851974,
+            -0.764713116528179,
+            0.24638225029883923,
+            0.09120627339903069
+          ],
+          [
+            0.7644596604431205,
+            0.6335774334403359,
+            0.11908427012139139,
+            0.0195588513994528
+          ],
+          [
+            -0.24716753712360587,
+            0.1174456693323142,
+            0.9618288430627013,
+            -0.35647610352444625
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "robot3",
+        "topic": "/robot3/pose",
+        "marker_from_target": [
+          [
+            0.6655444845781257,
+            -0.7438041333848571,
+            0.0616923837052851,
+            0.18760750435634954
+          ],
+          [
+            0.7426602216477598,
+            0.6681987468837267,
+            0.04434219035093939,
+            0.20465681270992084
+          ],
+          [
+            -0.07420467795050834,
+            0.016304779134364563,
+            0.9971097331525964,
+            -0.2837153306025531
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ],
+    "suitcase": [
+      {
+        "name": "suitcase1",
+        "topic": "/suitcase1/pose",
+        "marker_from_target": [
+          [
+            0.215177531,
+            -0.976574949,
+            0.0,
+            0.040023021
+          ],
+          [
+            0.976574949,
+            0.215177531,
+            0.0,
+            0.18164294
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            -0.4075
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "suitcase2",
+        "topic": "/suitcase2/pose",
+        "marker_from_target": [
+          [
+            0.043884853,
+            0.677474352,
+            0.734236081,
+            -0.198405702
+          ],
+          [
+            -0.010084099,
+            -0.7346063,
+            0.678418671,
+            -0.21359821
+          ],
+          [
+            0.998985701,
+            -0.037176413,
+            -0.025406371,
+            -0.000371123
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "suitcase3",
+        "topic": "/suitcase3/pose",
+        "marker_from_target": [
+          [
+            0.207013382,
+            0.060856071,
+            -0.976443546,
+            0.331318816
+          ],
+          [
+            -0.978337017,
+            0.011384759,
+            -0.206705266,
+            0.017215584
+          ],
+          [
+            -0.001462697,
+            0.998081623,
+            0.061894544,
+            -0.187679454
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ]
+  },
+  "calibration": {
+    "target": "suitcase_policy_frame",
+    "anchor_source": "suitcase1",
+    "anchor_definition": {
+      "position_policy_m": [
+        -0.186,
+        0.0,
+        0.4075
+      ],
+      "rotation": "Rz(-atan(11.8/2.6))"
+    },
+    "derived_from_synchronized_samples": 300,
+    "synchronization_window_s": 0.05,
+    "fit_position_std_mm": {
+      "suitcase2": [
+        0.0425,
+        0.0396,
+        0.0464
+      ],
+      "suitcase3": [
+        0.0331,
+        0.0338,
+        0.0269
+      ]
+    },
+    "fit_orientation_error_p95_deg": {
+      "suitcase2": 0.057,
+      "suitcase3": 0.0941
+    },
+    "torso_target": "g1_torso_policy_frame",
+    "torso_derived_from_synchronized_samples": 300,
+    "torso_fit_position_std_mm": {
+      "robot1": [
+        1.3139,
+        0.7879,
+        2.7719
+      ],
+      "robot2": [
+        0.4113,
+        0.1384,
+        0.424
+      ],
+      "robot3": [
+        1.2706,
+        0.2712,
+        0.5062
+      ]
+    },
+    "torso_fit_orientation_error_p95_deg": {
+      "robot1": 0.2714,
+      "robot2": 0.0684,
+      "robot3": 0.1031
+    },
+    "torso_calibration_mode": "fixed_torso_marker_sets_2026_09_20",
+    "torso_reference_in_suitcase_policy": {
+      "position_m": [
+        -0.67,
+        -0.3675,
+        0.86
+      ],
+      "rotation": "identity"
+    },
+    "torso_current_pose_reversal_validation": {
+      "formula": "T_world_target = T_world_marker * T_marker_target",
+      "samples": 300,
+      "suitcase_sources_used": [
+        "suitcase1",
+        "suitcase3"
+      ],
+      "suitcase_source_missing": [
+        "suitcase2"
+      ],
+      "robot1": {
+        "fit_position_std_mm": [
+          0.562,
+          1.15,
+          0.303
+        ],
+        "fit_orientation_p95_deg": 0.1803,
+        "reverse_position_p95_mm": 2.2251
+      },
+      "robot2": {
+        "fit_position_std_mm": [
+          0.992,
+          0.93,
+          0.994
+        ],
+        "fit_orientation_p95_deg": 0.201,
+        "reverse_position_p95_mm": 2.4879
+      },
+      "robot3": {
+        "fit_position_std_mm": [
+          0.928,
+          1.234,
+          0.3
+        ],
+        "fit_orientation_p95_deg": 0.1723,
+        "reverse_position_p95_mm": 2.2708
+      }
+    },
+    "note": "suitcase2 and suitcase3 are full SE(3) fits relative to suitcase1; do not replace them with the simplified two-rotation descriptions",
+    "robot_marker_quick_calibration": {
+      "timestamp_utc": "2026-09-20T08:13:28.670849+00:00",
+      "reference": "motion_frame_0_suitcase_from_torso_link",
+      "calibration_mode": "all_robot_markers_direct",
+      "motion": "/home/irmv/Workspace/Somaforce/somaforce-deploy/assets/mujoco/reference/hdmi_suitcase/motion.npz",
+      "motion_meta": "/home/irmv/Workspace/Somaforce/somaforce-deploy/assets/mujoco/reference/hdmi_suitcase/meta.json",
+      "suitcase_body": "suitcase",
+      "torso_body": "torso_link",
+      "suitcase_from_torso": [
+        [
+          0.9838458834583839,
+          0.017079792210673798,
+          0.17820089309549644,
+          -0.569144948772724
+        ],
+        [
+          -0.02351834122854028,
+          0.9991423157715349,
+          0.0340810865518226,
+          0.010043407211333455
+        ],
+        [
+          -0.17746595512337085,
+          -0.03772152611885006,
+          0.9834037427422243,
+          0.8185453124952579
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "observed_sources": [
+        "robot1",
+        "robot2",
+        "robot3"
+      ],
+      "inferred_sources": [],
+      "suitcase_sources_used": [
+        "suitcase1",
+        "suitcase3"
+      ],
+      "missing_source_method": "disabled; all robot markers are required",
+      "diagnostics": {
+        "robot1": {
+          "samples": 120,
+          "position_error_m_p95": 0.0008802247130077188,
+          "position_error_m_max": 0.018710478327741843,
+          "orientation_error_deg_p95": 0.1141769086147134,
+          "orientation_error_deg_max": 3.6381198207356324
+        },
+        "robot2": {
+          "samples": 120,
+          "position_error_m_p95": 0.000942202834788558,
+          "position_error_m_max": 0.017711898766688244,
+          "orientation_error_deg_p95": 0.15893940980798557,
+          "orientation_error_deg_max": 3.738887645152951
+        },
+        "robot3": {
+          "samples": 120,
+          "position_error_m_p95": 0.0009618780561425879,
+          "position_error_m_max": 0.018729968933436765,
+          "orientation_error_deg_p95": 0.12674876234756682,
+          "orientation_error_deg_max": 3.709662325620316
+        }
+      }
+    }
+  }
+}

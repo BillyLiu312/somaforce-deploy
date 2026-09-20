@@ -13,16 +13,24 @@ Run this file with the project virtualenv plus ROS Python paths, for example:
     PYTHONPATH=/opt/ros/humble/local/lib/python3.10/dist-packages:$PYTHONPATH \
       .venv/bin/python scripts/ros2_pose_to_zmq.py
 """
+
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
+from somaforce_deploy.mocap_fusion import (
+    MarkerSource,
+    MultiMarkerPoseFusion,
+    load_calibration_payload,
+    load_marker_sources,
+    load_world_from_mocap,
+)
 
 
 DEFAULT_SUITCASE_TOPIC = "/suitcase/pose"
@@ -40,7 +48,9 @@ def _finite_vector(values: Any, size: int, name: str) -> np.ndarray:
     return vector
 
 
-def pose_stamped_to_zmq_values(msg: Any, *, position_scale: float = 0.001) -> np.ndarray:
+def pose_stamped_to_zmq_values(
+    msg: Any, *, position_scale: float = 0.001
+) -> np.ndarray:
     """Convert a PoseStamped-like object to the repository's pose payload.
 
     ``position_scale`` is multiplied into ROS positions.  Use ``0.001`` for
@@ -78,9 +88,21 @@ def _pose_matrix_from_zmq_values(values: np.ndarray) -> np.ndarray:
     matrix = np.eye(4, dtype=np.float64)
     matrix[:3, :3] = np.asarray(
         [
-            [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * w), 2 * (qx * qz + qy * w)],
-            [2 * (qx * qy + qz * w), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * w)],
-            [2 * (qx * qz - qy * w), 2 * (qy * qz + qx * w), 1 - 2 * (qx * qx + qy * qy)],
+            [
+                1 - 2 * (qy * qy + qz * qz),
+                2 * (qx * qy - qz * w),
+                2 * (qx * qz + qy * w),
+            ],
+            [
+                2 * (qx * qy + qz * w),
+                1 - 2 * (qx * qx + qz * qz),
+                2 * (qy * qz - qx * w),
+            ],
+            [
+                2 * (qx * qz - qy * w),
+                2 * (qy * qz + qx * w),
+                1 - 2 * (qx * qx + qy * qy),
+            ],
         ]
     )
     matrix[:3, 3] = [x, y, z]
@@ -99,19 +121,34 @@ def _wxyz_from_rotation(rotation: np.ndarray) -> np.ndarray:
         diagonal = np.diag(rotation)
         index = int(np.argmax(diagonal))
         if index == 0:
-            s = math.sqrt(max(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2], 1e-12)) * 2.0
+            s = (
+                math.sqrt(
+                    max(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2], 1e-12)
+                )
+                * 2.0
+            )
             w = (rotation[2, 1] - rotation[1, 2]) / s
             x = 0.25 * s
             y = (rotation[0, 1] + rotation[1, 0]) / s
             z = (rotation[0, 2] + rotation[2, 0]) / s
         elif index == 1:
-            s = math.sqrt(max(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2], 1e-12)) * 2.0
+            s = (
+                math.sqrt(
+                    max(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2], 1e-12)
+                )
+                * 2.0
+            )
             w = (rotation[0, 2] - rotation[2, 0]) / s
             x = (rotation[0, 1] + rotation[1, 0]) / s
             y = 0.25 * s
             z = (rotation[1, 2] + rotation[2, 1]) / s
         else:
-            s = math.sqrt(max(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1], 1e-12)) * 2.0
+            s = (
+                math.sqrt(
+                    max(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1], 1e-12)
+                )
+                * 2.0
+            )
             w = (rotation[1, 0] - rotation[0, 1]) / s
             x = (rotation[0, 2] + rotation[2, 0]) / s
             y = (rotation[1, 2] + rotation[2, 1]) / s
@@ -119,47 +156,6 @@ def _wxyz_from_rotation(rotation: np.ndarray) -> np.ndarray:
     quaternion = np.asarray([w, x, y, z], dtype=np.float64)
     quaternion /= np.linalg.norm(quaternion)
     return quaternion
-
-
-def _load_calibration(path: str | None) -> tuple[np.ndarray | None, dict[str, np.ndarray]]:
-    if path is None:
-        return None, {}
-    payload = json.loads(__import__("pathlib").Path(path).read_text())
-    if payload.get("valid", True) is not True:
-        raise ValueError("calibration file is marked invalid; fix residuals before use")
-    matrix = None
-    if "world_from_mocap" in payload:
-        matrix = np.asarray(payload["world_from_mocap"], dtype=np.float64)
-        if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
-            raise ValueError("world_from_mocap must be a finite 4x4 matrix")
-        if not np.allclose(matrix[3], [0, 0, 0, 1], atol=1e-6):
-            raise ValueError("world_from_mocap last row must be [0, 0, 0, 1]")
-        rotation = matrix[:3, :3]
-        if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-4) or not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-4):
-            raise ValueError("world_from_mocap rotation is not a proper rigid rotation")
-    marker_to_policy: dict[str, np.ndarray] = {}
-    for role, raw_matrix in dict(payload.get("marker_to_policy", {})).items():
-        candidate = np.asarray(raw_matrix, dtype=np.float64)
-        if candidate.shape != (4, 4) or not np.isfinite(candidate).all():
-            raise ValueError(f"marker_to_policy[{role!r}] must be a finite 4x4 matrix")
-        if not np.allclose(candidate[3], [0, 0, 0, 1], atol=1e-6):
-            raise ValueError(f"marker_to_policy[{role!r}] last row must be [0, 0, 0, 1]")
-        rotation = candidate[:3, :3]
-        if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-4) or not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-4):
-            raise ValueError(f"marker_to_policy[{role!r}] rotation is not a proper rigid rotation")
-        marker_to_policy[str(role)] = candidate
-    for role, key in (("torso", "marker_from_torso"), ("suitcase", "marker_from_suitcase")):
-        if key in payload and role not in marker_to_policy:
-            candidate = np.asarray(payload[key], dtype=np.float64)
-            if candidate.shape != (4, 4) or not np.isfinite(candidate).all():
-                raise ValueError(f"{key} must be a finite 4x4 matrix")
-            if not np.allclose(candidate[3], [0, 0, 0, 1], atol=1e-6):
-                raise ValueError(f"{key} last row must be [0, 0, 0, 1]")
-            rotation = candidate[:3, :3]
-            if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-4) or not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-4):
-                raise ValueError(f"{key} rotation is not a proper rigid rotation")
-            marker_to_policy[role] = candidate
-    return matrix, marker_to_policy
 
 
 def pose_values_to_bytes(values: Any) -> bytes:
@@ -175,8 +171,10 @@ def stale_watchdog_expired(
     elapsed_s: float,
     startup_timeout_s: float,
     stale_timeout_s: float,
+    stream_started: bool = False,
 ) -> bool:
-    return elapsed_s >= startup_timeout_s and max(ages) > stale_timeout_s
+    startup_grace_complete = stream_started or elapsed_s >= startup_timeout_s
+    return startup_grace_complete and max(ages) > stale_timeout_s
 
 
 def _self_test() -> int:
@@ -194,7 +192,9 @@ def _self_test() -> int:
         pose = Pose()
 
     values = pose_stamped_to_zmq_values(Message())
-    expected = np.asarray([1.0, -0.25, 0.5, 0.70710677, 0.0, 0.0, 0.70710677], dtype=np.float32)
+    expected = np.asarray(
+        [1.0, -0.25, 0.5, 0.70710677, 0.0, 0.0, 0.70710677], dtype=np.float32
+    )
     if not np.allclose(values, expected, atol=1e-6):
         raise AssertionError(f"unexpected conversion: {values}")
     payload = pose_values_to_bytes(values)
@@ -207,48 +207,63 @@ def _self_test() -> int:
 @dataclass
 class _Relay:
     role: str
-    topic: str
     port: int
     position_scale: float
     publisher: Any
     expected_frame_id: str
+    sources: tuple[MarkerSource, ...]
+    fusion: MultiMarkerPoseFusion
     world_from_mocap: np.ndarray | None = None
-    marker_to_policy: np.ndarray | None = None
     last_received: float = 0.0
     count: int = 0
     rejected: int = 0
+    disagreement: int = 0
+    last_used_sources: tuple[str, ...] = ()
 
-    def callback(self, msg: Any) -> None:
-        try:
-            frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
-            if self.expected_frame_id and frame_id != self.expected_frame_id:
-                raise ValueError(
-                    f"frame_id {frame_id!r} does not match expected "
-                    f"{self.expected_frame_id!r}"
+    def callback_for(self, source: MarkerSource):
+        def callback(msg: Any) -> None:
+            try:
+                frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
+                if self.expected_frame_id and frame_id != self.expected_frame_id:
+                    raise ValueError(
+                        f"frame_id {frame_id!r} does not match expected "
+                        f"{self.expected_frame_id!r}"
+                    )
+                values = pose_stamped_to_zmq_values(
+                    msg, position_scale=self.position_scale
                 )
-            values = pose_stamped_to_zmq_values(
-                msg, position_scale=self.position_scale
-            )
-            if self.world_from_mocap is not None or self.marker_to_policy is not None:
-                transformed = _pose_matrix_from_zmq_values(values)
-                if self.marker_to_policy is not None:
-                    transformed = transformed @ self.marker_to_policy
+                now = time.monotonic()
+                self.fusion.update(
+                    source.name,
+                    _pose_matrix_from_zmq_values(values),
+                    received_at=now,
+                )
+                fused = self.fusion.resolve(now=now)
+                if fused is None:
+                    self.disagreement += 1
+                    return
+                transformed = fused.world_from_target
                 if self.world_from_mocap is not None:
                     transformed = self.world_from_mocap @ transformed
-                values = np.concatenate(
-                    [transformed[:3, 3].astype(np.float32), _wxyz_from_rotation(transformed[:3, :3]).astype(np.float32)]
+                output = np.concatenate(
+                    [
+                        transformed[:3, 3].astype(np.float32),
+                        _wxyz_from_rotation(transformed[:3, :3]).astype(np.float32),
+                    ]
                 )
-            # PUB sockets may be briefly back-pressured while a subscriber joins;
-            # dropping that frame is preferable to blocking the ROS callback.
-            import zmq
+                # Dropping a back-pressured frame is preferable to blocking ROS.
+                import zmq
 
-            self.publisher.send(pose_values_to_bytes(values), flags=zmq.NOBLOCK)
-        except Exception as exc:
-            self.rejected += 1
-            print(f"rejecting {self.topic} pose: {exc}", flush=True)
-            return
-        self.last_received = time.monotonic()
-        self.count += 1
+                self.publisher.send(pose_values_to_bytes(output), flags=zmq.NOBLOCK)
+            except Exception as exc:
+                self.rejected += 1
+                print(f"rejecting {source.topic} pose: {exc}", flush=True)
+                return
+            self.last_received = now
+            self.last_used_sources = fused.used_sources
+            self.count += 1
+
+        return callback
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -279,6 +294,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON from calibrate_ros2_pose.py containing world_from_mocap",
     )
+    parser.add_argument(
+        "--marker-corrections",
+        default=None,
+        help="optional persistent marker-frame correction JSON",
+    )
     parser.add_argument("--stale-timeout", type=float, default=0.25)
     parser.add_argument(
         "--startup-timeout",
@@ -292,6 +312,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="exit with status 2 when either pose stops updating",
     )
     parser.add_argument("--stats-period", type=float, default=1.0)
+    parser.add_argument("--marker-synchronization-window-s", type=float, default=0.05)
+    parser.add_argument("--marker-position-consensus-m", type=float, default=0.08)
+    parser.add_argument("--marker-orientation-consensus-deg", type=float, default=12.0)
+    parser.add_argument(
+        "--suitcase-preferred-marker-source",
+        default=None,
+        help="use this synchronized suitcase source directly when it is available",
+    )
+    parser.add_argument(
+        "--marker-source-switch-blend-s",
+        type=float,
+        default=0.25,
+        help="blend pose-frame offsets after the active marker set changes",
+    )
+    parser.add_argument(
+        "--print-source-topics",
+        action="store_true",
+        help="print calibrated marker topics and exit without importing ROS",
+    )
     parser.add_argument("--node-name", default="sim2real_pose_adapter")
     parser.add_argument("--self-test", action="store_true")
     return parser
@@ -301,11 +340,43 @@ def main() -> int:
     args = _build_parser().parse_args()
     if args.self_test:
         return _self_test()
-    if args.stale_timeout <= 0 or args.startup_timeout <= 0 or args.stats_period <= 0:
-        raise ValueError("stale-timeout, startup-timeout, and stats-period must be positive")
+    if (
+        args.stale_timeout <= 0
+        or args.startup_timeout <= 0
+        or args.stats_period <= 0
+        or args.marker_synchronization_window_s <= 0
+        or args.marker_position_consensus_m <= 0
+        or args.marker_orientation_consensus_deg <= 0
+        or args.marker_source_switch_blend_s < 0
+    ):
+        raise ValueError(
+            "timeouts, periods, and marker consensus limits must be positive"
+        )
     if args.suitcase_port == args.pelvis_port:
         raise ValueError("suitcase and pelvis ports must be different")
-    world_from_mocap, marker_to_policy = _load_calibration(args.transform_json)
+    calibration = load_calibration_payload(args.transform_json)
+    corrections = load_calibration_payload(args.marker_corrections)
+    world_from_mocap = load_world_from_mocap(calibration)
+    source_groups = {
+        "suitcase": load_marker_sources(
+            calibration,
+            role="suitcase",
+            legacy_topic=args.suitcase_topic,
+            corrections=corrections,
+        )
+    }
+    if not args.suitcase_only:
+        source_groups["pelvis"] = load_marker_sources(
+            calibration,
+            role="pelvis",
+            legacy_topic=args.pelvis_topic,
+            corrections=corrections,
+        )
+    if args.print_source_topics:
+        for sources in source_groups.values():
+            for source in sources:
+                print(source.topic)
+        return 0
 
     try:
         import rclpy
@@ -321,24 +392,37 @@ def main() -> int:
 
     context = zmq.Context()
     relays: list[_Relay] = []
-    relay_specs = [("suitcase", args.suitcase_topic, args.suitcase_port)]
+    relay_specs = [("suitcase", args.suitcase_port)]
     if not args.suitcase_only:
-        relay_specs.append(("pelvis", args.pelvis_topic, args.pelvis_port))
-    for role, topic, port in relay_specs:
+        relay_specs.append(("pelvis", args.pelvis_port))
+    for role, port in relay_specs:
         publisher = context.socket(zmq.PUB)
         publisher.setsockopt(zmq.SNDHWM, 1)
         publisher.setsockopt(zmq.LINGER, 0)
         publisher.bind(f"tcp://{args.bind_address}:{port}")
+        sources = source_groups[role]
         relays.append(
             _Relay(
                 role=role,
-                topic=topic,
                 port=port,
                 position_scale=args.position_scale,
                 publisher=publisher,
                 expected_frame_id=args.expected_frame_id,
+                sources=sources,
+                fusion=MultiMarkerPoseFusion(
+                    sources,
+                    stale_timeout_s=args.stale_timeout,
+                    synchronization_window_s=args.marker_synchronization_window_s,
+                    position_consensus_m=args.marker_position_consensus_m,
+                    orientation_consensus_deg=args.marker_orientation_consensus_deg,
+                    source_switch_blend_s=args.marker_source_switch_blend_s,
+                    preferred_source_name=(
+                        args.suitcase_preferred_marker_source
+                        if role == "suitcase"
+                        else None
+                    ),
+                ),
                 world_from_mocap=world_from_mocap,
-                marker_to_policy=marker_to_policy.get(role),
             )
         )
 
@@ -348,17 +432,26 @@ def main() -> int:
     qos.reliability = ReliabilityPolicy.BEST_EFFORT
     qos.durability = DurabilityPolicy.VOLATILE
     for relay in relays:
-        node.create_subscription(PoseStamped, relay.topic, relay.callback, qos)
+        for source in relay.sources:
+            node.create_subscription(
+                PoseStamped, source.topic, relay.callback_for(source), qos
+            )
     route_text = ", ".join(
-        f"{relay.topic}=>{args.bind_address}:{relay.port}" for relay in relays
+        f"[{','.join(source.topic for source in relay.sources)}]"
+        f"=>{args.bind_address}:{relay.port}"
+        for relay in relays
     )
     node.get_logger().info(
         f"ROS2 -> ZMQ relay: {route_text}, position_scale={args.position_scale:g}, "
-        f"frame_id={args.expected_frame_id!r}, transform={'enabled' if world_from_mocap is not None else 'none'}"
+        f"frame_id={args.expected_frame_id!r}, "
+        f"suitcase_preferred={args.suitcase_preferred_marker_source!r}, "
+        f"position_consensus_m={args.marker_position_consensus_m:g}, "
+        f"transform={'enabled' if world_from_mocap is not None else 'none'}"
     )
 
     last_stats = time.monotonic()
     started_at = last_stats
+    streams_healthy = False
     try:
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.05)
@@ -367,9 +460,29 @@ def main() -> int:
                 states = []
                 stale = False
                 for relay in relays:
-                    age = math.inf if relay.last_received == 0 else now - relay.last_received
+                    age = (
+                        math.inf
+                        if relay.last_received == 0
+                        else now - relay.last_received
+                    )
                     stale |= age > args.stale_timeout
-                    states.append(f"{relay.topic}:count={relay.count},age={age:.3f}s,rejected={relay.rejected}")
+                    source_ages = relay.fusion.source_ages(now=now)
+                    fresh = [
+                        name
+                        for name, source_age in source_ages.items()
+                        if source_age <= args.stale_timeout
+                    ]
+                    states.append(
+                        f"{relay.role}:count={relay.count},age={age:.3f}s,"
+                        f"fresh={fresh},used={list(relay.last_used_sources)},"
+                        f"rejected={relay.rejected},disagreement={relay.disagreement}"
+                    )
+                if all(
+                    relay.last_received != 0
+                    and now - relay.last_received <= args.stale_timeout
+                    for relay in relays
+                ):
+                    streams_healthy = True
                 node.get_logger().info("; ".join(states))
                 last_stats = now
                 if args.exit_on_stale and stale_watchdog_expired(
@@ -382,6 +495,7 @@ def main() -> int:
                     elapsed_s=now - started_at,
                     startup_timeout_s=args.startup_timeout,
                     stale_timeout_s=args.stale_timeout,
+                    stream_started=streams_healthy,
                 ):
                     node.get_logger().error("pose watchdog expired")
                     return 2

@@ -198,7 +198,10 @@ def main() -> int:
 
             def residual_policy(input_dict):
                 nominal, _nominal_target, next_state = original_policy(input_dict)
-                frame = residual_receiver.receive_latest()
+                frame = residual_receiver.receive_latest_or_unavailable(
+                    timeout_ms=0,
+                    max_age_ms=100,
+                )
                 proprio = residual_proprio(
                     policy.state_processor,
                     default_joint_pos=residual_default,

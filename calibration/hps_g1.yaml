@@ -1,0 +1,61 @@
+schema: somaforce_ft_calibration_v1
+# Extrinsics, stream device IDs, and axial force sign were measured on G1.
+# Hand mass/CoM gravity compensation is configured from the measured values.
+# Cross-pose validation is still required before residual authority is enabled.
+valid: true
+validation_scope: runtime_tare_and_residual_shadow
+upstream_distal_load_compensated: false
+
+sides:
+  left:
+    device_id: 18174
+    # A push toward the wrist is sensor -Z and wrist -X; raw Fz decreases, so
+    # the raw vector already represents the external force direction.
+    measurement_sign: 1
+    bias_sensor: [0, 0, 0, 0, 0, 0]
+    # Sensor +X -> wrist -Z, sensor +Y -> wrist +Y,
+    # therefore sensor +Z -> wrist +X.
+    wrist_from_sensor:
+      - [0, 0, 1, 0.0725]
+      - [0, 1, 0, 0]
+      - [-1, 0, 0, 0]
+      - [0, 0, 0, 1]
+    force_limit_N: 500
+    moment_limit_Nm: 50
+    gravity_compensation:
+      enabled: true
+      mass_kg: 0.115
+      com_sensor_m: [0, 0, 0.076]
+
+  right:
+    device_id: 18174
+    # A push toward the wrist is sensor -Z and wrist -X; raw Fz decreases, so
+    # the raw vector already represents the external force direction.
+    measurement_sign: 1
+    bias_sensor: [0, 0, 0, 0, 0, 0]
+    # Sensor +X -> wrist +Z, sensor +Y -> wrist -Y,
+    # therefore sensor +Z -> wrist +X.
+    wrist_from_sensor:
+      - [0, 0, 1, 0.0725]
+      - [0, -1, 0, 0]
+      - [1, 0, 0, 0]
+      - [0, 0, 0, 1]
+    force_limit_N: 500
+    moment_limit_Nm: 50
+    gravity_compensation:
+      enabled: true
+      mass_kg: 0.115
+      com_sensor_m: [0, 0, 0.076]
+
+token:
+  # With gravity compensation enabled, this estimates electronic bias after
+  # subtracting the modeled hand gravity wrench at the current G1 pose.
+  require_runtime_tare: true
+  force_scale_N: 100
+  moment_scale_Nm: 10
+  stale_timeout_s: 0.10
+  robot_state_timeout_s: 0.10
+  contact_on_threshold: 0.05
+  contact_off_threshold: 0.025
+  probability_temperature: 0.02
+  smoothing_alpha: 0.5

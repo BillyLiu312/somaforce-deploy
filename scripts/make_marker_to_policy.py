@@ -26,19 +26,83 @@ def _inverse_transform(position: list[float], rpy_deg: list[float]) -> np.ndarra
     return np.linalg.inv(measured)
 
 
+def _marker_source(values: list[str], role: str) -> dict[str, object]:
+    name, topic, *raw_numbers = values
+    if not name:
+        raise ValueError(f"{role} marker name must not be empty")
+    if not topic.startswith("/"):
+        raise ValueError(f"{role} marker topic must be absolute: {topic!r}")
+    try:
+        numbers = [float(value) for value in raw_numbers]
+    except ValueError as exc:
+        raise ValueError(f"{role} marker position/RPY must be numeric") from exc
+    return {
+        "name": name,
+        "topic": topic,
+        "marker_from_target": _inverse_transform(numbers[:3], numbers[3:]).tolist(),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for role in ("pelvis", "suitcase"):
-        parser.add_argument(f"--{role}-marker-position", type=float, nargs=3, required=True)
-        parser.add_argument(f"--{role}-marker-rpy-deg", type=float, nargs=3, required=True)
+        parser.add_argument(f"--{role}-marker-position", type=float, nargs=3)
+        parser.add_argument(f"--{role}-marker-rpy-deg", type=float, nargs=3)
+    for role in ("torso", "suitcase"):
+        parser.add_argument(
+            f"--{role}-source",
+            action="append",
+            nargs=8,
+            metavar=("NAME", "TOPIC", "PX", "PY", "PZ", "ROLL", "PITCH", "YAW"),
+            help=(
+                "repeat for each rigid-body marker; position is marker origin in "
+                "the target frame (m), followed by target-frame XYZ RPY (deg)"
+            ),
+        )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = {
-        "schema": "sim2real_marker_to_policy_v1",
-        "convention": "T_marker_policy; input measurements were T_policy_marker",
-        "pelvis": _inverse_transform(args.pelvis_marker_position, args.pelvis_marker_rpy_deg).tolist(),
-        "suitcase": _inverse_transform(args.suitcase_marker_position, args.suitcase_marker_rpy_deg).tolist(),
-    }
+    multi_marker = bool(args.torso_source or args.suitcase_source)
+    if multi_marker:
+        if not args.torso_source or not args.suitcase_source:
+            raise ValueError("multi-marker output requires torso and suitcase sources")
+        result = {
+            "schema": "sim2real_marker_to_policy_v2",
+            "convention": (
+                "T_marker_target maps target coordinates into each marker frame; "
+                "input measurements were T_target_marker"
+            ),
+            "marker_sources": {
+                "torso": [
+                    _marker_source(values, "torso") for values in args.torso_source
+                ],
+                "suitcase": [
+                    _marker_source(values, "suitcase")
+                    for values in args.suitcase_source
+                ],
+            },
+        }
+    else:
+        legacy_values = (
+            args.pelvis_marker_position,
+            args.pelvis_marker_rpy_deg,
+            args.suitcase_marker_position,
+            args.suitcase_marker_rpy_deg,
+        )
+        if any(value is None for value in legacy_values):
+            raise ValueError(
+                "provide all legacy pelvis/suitcase marker arguments, or repeat "
+                "--torso-source and --suitcase-source"
+            )
+        result = {
+            "schema": "sim2real_marker_to_policy_v1",
+            "convention": "T_marker_policy; input measurements were T_policy_marker",
+            "pelvis": _inverse_transform(
+                args.pelvis_marker_position, args.pelvis_marker_rpy_deg
+            ).tolist(),
+            "suitcase": _inverse_transform(
+                args.suitcase_marker_position, args.suitcase_marker_rpy_deg
+            ).tolist(),
+        }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))

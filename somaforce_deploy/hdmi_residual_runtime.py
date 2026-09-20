@@ -1,7 +1,7 @@
 """Cross-contract residual state and local MuJoCo F/T transport."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import struct
 import time
 
@@ -15,8 +15,11 @@ from .residual import CrossResidual
 RESIDUAL_FT_PORT = 5580
 RESIDUAL_LOCKSTEP_PORT = 5581
 _FT_HEADER = struct.Struct("<Qqif")
+_FT_V2_MAGIC = b"SFT2"
+_FT_V2_HEADER = struct.Struct("<4sQqifQq2q2q2q2q2q")
 _TOKEN_FLOATS = 2 * 14
 _WRENCH_FLOATS = 2 * 6
+_RAW_WRENCH_FLOATS = 2 * 6
 
 
 @dataclass(frozen=True)
@@ -27,31 +30,138 @@ class ResidualFTFrame:
     total_force_norm: float
     token: np.ndarray
     wrench_base_yaw: np.ndarray
+    publish_monotonic_ns: int = 0
+    kinematics_monotonic_ns: int = -1
+    sample_received_monotonic_ns: np.ndarray = field(
+        default_factory=lambda: np.full(2, -1, dtype=np.int64)
+    )
+    sample_source_time_ns: np.ndarray = field(
+        default_factory=lambda: np.full(2, -1, dtype=np.int64)
+    )
+    sample_sequence: np.ndarray = field(
+        default_factory=lambda: np.full(2, -1, dtype=np.int64)
+    )
+    sample_device_id: np.ndarray = field(
+        default_factory=lambda: np.full(2, -1, dtype=np.int64)
+    )
+    sample_status: np.ndarray = field(
+        default_factory=lambda: np.full(2, -1, dtype=np.int64)
+    )
+    wrench_sensor: np.ndarray = field(
+        default_factory=lambda: np.zeros((2, 6), dtype=np.float32)
+    )
+
+    def __post_init__(self) -> None:
+        for name in (
+            "sample_received_monotonic_ns",
+            "sample_source_time_ns",
+            "sample_sequence",
+            "sample_device_id",
+            "sample_status",
+        ):
+            value = np.asarray(getattr(self, name), dtype=np.int64)
+            if value.shape != (2,):
+                raise ValueError(f"{name} must have shape (2,), got {value.shape}")
+            object.__setattr__(self, name, value.copy())
+        raw_wrench = np.asarray(self.wrench_sensor, dtype=np.float32)
+        if raw_wrench.shape != (2, 6):
+            raise ValueError(
+                f"wrench_sensor must have shape (2, 6), got {raw_wrench.shape}"
+            )
+        object.__setattr__(self, "wrench_sensor", raw_wrench.copy())
 
     def to_bytes(self) -> bytes:
         token = require_array(self.token, (2, 14), "token")
         wrench = require_array(self.wrench_base_yaw, (2, 6), "wrench_base_yaw")
-        return _FT_HEADER.pack(
+        return _FT_V2_HEADER.pack(
+            _FT_V2_MAGIC,
             int(self.timestamp_ns),
             int(self.sequence),
             int(self.contact_count),
             float(self.total_force_norm),
-        ) + np.concatenate((token.reshape(-1), wrench.reshape(-1))).astype("<f4").tobytes()
+            int(self.publish_monotonic_ns),
+            int(self.kinematics_monotonic_ns),
+            *self.sample_received_monotonic_ns.tolist(),
+            *self.sample_source_time_ns.tolist(),
+            *self.sample_sequence.tolist(),
+            *self.sample_device_id.tolist(),
+            *self.sample_status.tolist(),
+        ) + np.concatenate(
+            (token.reshape(-1), wrench.reshape(-1), self.wrench_sensor.reshape(-1))
+        ).astype("<f4").tobytes()
 
     @classmethod
     def from_bytes(cls, payload: bytes) -> "ResidualFTFrame":
-        expected = _FT_HEADER.size + (_TOKEN_FLOATS + _WRENCH_FLOATS) * 4
-        if len(payload) != expected:
-            raise ValueError(f"residual F/T payload must contain {expected} bytes")
-        timestamp_ns, sequence, contact_count, force_norm = _FT_HEADER.unpack_from(payload)
-        values = np.frombuffer(payload, dtype="<f4", offset=_FT_HEADER.size)
+        legacy_float_bytes = (_TOKEN_FLOATS + _WRENCH_FLOATS) * 4
+        v2_float_bytes = (
+            _TOKEN_FLOATS + _WRENCH_FLOATS + _RAW_WRENCH_FLOATS
+        ) * 4
+        legacy_size = _FT_HEADER.size + legacy_float_bytes
+        v2_size = _FT_V2_HEADER.size + v2_float_bytes
+        if len(payload) == legacy_size:
+            timestamp_ns, sequence, contact_count, force_norm = _FT_HEADER.unpack_from(
+                payload
+            )
+            publish_monotonic_ns = 0
+            kinematics_monotonic_ns = -1
+            sample_received_monotonic_ns = np.full(2, -1, dtype=np.int64)
+            sample_source_time_ns = np.full(2, -1, dtype=np.int64)
+            sample_sequence = np.full(2, -1, dtype=np.int64)
+            sample_device_id = np.full(2, -1, dtype=np.int64)
+            sample_status = np.full(2, -1, dtype=np.int64)
+            offset = _FT_HEADER.size
+        elif len(payload) == v2_size:
+            unpacked = _FT_V2_HEADER.unpack_from(payload)
+            if unpacked[0] != _FT_V2_MAGIC:
+                raise ValueError("residual F/T payload has invalid v2 magic")
+            timestamp_ns, sequence, contact_count, force_norm = unpacked[1:5]
+            publish_monotonic_ns = unpacked[5]
+            kinematics_monotonic_ns = unpacked[6]
+            sample_received_monotonic_ns = np.asarray(unpacked[7:9], dtype=np.int64)
+            sample_source_time_ns = np.asarray(unpacked[9:11], dtype=np.int64)
+            sample_sequence = np.asarray(unpacked[11:13], dtype=np.int64)
+            sample_device_id = np.asarray(unpacked[13:15], dtype=np.int64)
+            sample_status = np.asarray(unpacked[15:17], dtype=np.int64)
+            offset = _FT_V2_HEADER.size
+        else:
+            raise ValueError(
+                f"residual F/T payload must contain {legacy_size} or {v2_size} bytes"
+            )
+        values = np.frombuffer(payload, dtype="<f4", offset=offset)
+        raw_offset = _TOKEN_FLOATS + _WRENCH_FLOATS
         return cls(
             timestamp_ns=timestamp_ns,
             sequence=sequence,
             contact_count=contact_count,
             total_force_norm=force_norm,
             token=values[:_TOKEN_FLOATS].reshape(2, 14).copy(),
-            wrench_base_yaw=values[_TOKEN_FLOATS:].reshape(2, 6).copy(),
+            wrench_base_yaw=values[_TOKEN_FLOATS:raw_offset].reshape(2, 6).copy(),
+            publish_monotonic_ns=publish_monotonic_ns,
+            kinematics_monotonic_ns=kinematics_monotonic_ns,
+            sample_received_monotonic_ns=sample_received_monotonic_ns,
+            sample_source_time_ns=sample_source_time_ns,
+            sample_sequence=sample_sequence,
+            sample_device_id=sample_device_id,
+            sample_status=sample_status,
+            wrench_sensor=(
+                values[raw_offset:].reshape(2, 6).copy()
+                if len(payload) == v2_size
+                else np.zeros((2, 6), dtype=np.float32)
+            ),
+        )
+
+    @classmethod
+    def unavailable(
+        cls, *, timestamp_ns: int | None = None, sequence: int = 0
+    ) -> "ResidualFTFrame":
+        return cls(
+            timestamp_ns=time.time_ns() if timestamp_ns is None else int(timestamp_ns),
+            sequence=int(sequence),
+            contact_count=0,
+            total_force_norm=0.0,
+            token=np.zeros((2, 14), dtype=np.float32),
+            wrench_base_yaw=np.zeros((2, 6), dtype=np.float32),
+            publish_monotonic_ns=time.monotonic_ns(),
         )
 
 
@@ -68,6 +178,9 @@ class ResidualFTPublisher:
         except zmq.Again:
             pass
 
+    def close(self) -> None:
+        self.socket.close(linger=0)
+
 
 class ResidualFTReceiver:
     def __init__(self, port: int = RESIDUAL_FT_PORT, host: str = "127.0.0.1") -> None:
@@ -76,19 +189,77 @@ class ResidualFTReceiver:
         self.socket.setsockopt(zmq.CONFLATE, 1)
         self.socket.setsockopt(zmq.LINGER, 0)
         self.socket.connect(f"tcp://{host}:{int(port)}")
+        self._latest: ResidualFTFrame | None = None
+
+    @property
+    def latest(self) -> ResidualFTFrame | None:
+        return self._latest
+
+    def _receive_available(self, timeout_ms: int) -> ResidualFTFrame | None:
+        if self.socket.poll(timeout=int(timeout_ms), flags=zmq.POLLIN):
+            payload = self.socket.recv()
+            while self.socket.poll(timeout=0, flags=zmq.POLLIN):
+                payload = self.socket.recv()
+            self._latest = ResidualFTFrame.from_bytes(payload)
+        return self._latest
+
+    @staticmethod
+    def _is_fresh(
+        frame: ResidualFTFrame,
+        *,
+        now_ns: int,
+        now_monotonic_ns: int,
+        max_age_ms: int,
+    ) -> bool:
+        if frame.publish_monotonic_ns > 0:
+            age_ns = int(now_monotonic_ns) - int(frame.publish_monotonic_ns)
+        else:
+            age_ns = int(now_ns) - int(frame.timestamp_ns)
+        return -10_000_000 <= age_ns <= int(max_age_ms) * 1_000_000
 
     def receive_latest(
         self, *, timeout_ms: int = 1000, max_age_ms: int = 1000
     ) -> ResidualFTFrame:
-        if not self.socket.poll(timeout=int(timeout_ms), flags=zmq.POLLIN):
+        frame = self._receive_available(timeout_ms)
+        if frame is None:
             raise RuntimeError("timed out waiting for residual wrist F/T frame")
-        payload = self.socket.recv()
-        while self.socket.poll(timeout=0, flags=zmq.POLLIN):
-            payload = self.socket.recv()
-        frame = ResidualFTFrame.from_bytes(payload)
-        if time.time_ns() - frame.timestamp_ns > int(max_age_ms) * 1_000_000:
+        if not self._is_fresh(
+            frame,
+            now_ns=time.time_ns(),
+            now_monotonic_ns=time.monotonic_ns(),
+            max_age_ms=int(max_age_ms),
+        ):
             raise RuntimeError("residual wrist F/T frame is stale")
         return frame
+
+    def receive_latest_or_unavailable(
+        self,
+        *,
+        timeout_ms: int = 0,
+        max_age_ms: int = 100,
+        now_ns: int | None = None,
+        now_monotonic_ns: int | None = None,
+    ) -> ResidualFTFrame:
+        """Return a zero-quality frame instead of blocking nominal inference."""
+        now = time.time_ns() if now_ns is None else int(now_ns)
+        now_mono = (
+            time.monotonic_ns()
+            if now_monotonic_ns is None
+            else int(now_monotonic_ns)
+        )
+        frame = self._receive_available(timeout_ms)
+        if frame is not None and self._is_fresh(
+            frame,
+            now_ns=now,
+            now_monotonic_ns=now_mono,
+            max_age_ms=int(max_age_ms),
+        ):
+            return frame
+        sequence = 0 if frame is None else frame.sequence
+        return ResidualFTFrame.unavailable(timestamp_ns=now, sequence=sequence)
+
+    def close(self) -> None:
+        self.socket.close(linger=0)
 
 
 class LockstepServer:
@@ -171,11 +342,15 @@ class HDMIResidualController:
             raise ValueError("residual mode must be shadow, c1, or c2")
         self.residual = residual
         self.mode = mode
-        self.default_joint_pos = require_array(default_joint_pos, (ACTION_DIM,), "default_joint_pos")
+        self.default_joint_pos = require_array(
+            default_joint_pos, (ACTION_DIM,), "default_joint_pos"
+        )
         self.action_scale = require_array(action_scale, (ACTION_DIM,), "action_scale")
         self.joint_lower = require_array(joint_lower, (ACTION_DIM,), "joint_lower")
         self.joint_upper = require_array(joint_upper, (ACTION_DIM,), "joint_upper")
-        self.velocity_limit = require_array(velocity_limit, (ACTION_DIM,), "velocity_limit")
+        self.velocity_limit = require_array(
+            velocity_limit, (ACTION_DIM,), "velocity_limit"
+        )
         self.control_dt = float(control_dt)
         if self.control_dt <= 0.0 or np.any(self.action_scale <= 0.0):
             raise ValueError("control_dt and action_scale must be positive")
@@ -204,7 +379,9 @@ class HDMIResidualController:
         nominal = require_array(nominal, (1, ACTION_DIM), "nominal")
         wrist_frame = require_array(wrist_frame, (2, 14), "wrist_frame")
         proprio = require_array(proprio, (1, 64), "proprio")
-        current_joint_pos = require_array(current_joint_pos, (1, ACTION_DIM), "current_joint_pos")
+        current_joint_pos = require_array(
+            current_joint_pos, (1, ACTION_DIM), "current_joint_pos"
+        )
         self.wrist_history[:, :, :-1] = self.wrist_history[:, :, 1:].copy()
         self.wrist_history[:, :, -1] = wrist_frame
         self._push_newest(self.nominal_history, nominal)
@@ -219,7 +396,11 @@ class HDMIResidualController:
         contact_target = float(1.0 - np.prod(1.0 - probability * quality))
         step = 0.1 if contact_target > self.contact_gain else -0.1
         self.contact_gain = float(
-            np.clip(self.contact_gain + step, min(self.contact_gain, contact_target), max(self.contact_gain, contact_target))
+            np.clip(
+                self.contact_gain + step,
+                min(self.contact_gain, contact_target),
+                max(self.contact_gain, contact_target),
+            )
         )
         bounded = np.tanh(raw).astype(np.float32) * self.authority[None, :]
         gated = bounded * np.float32(self.contact_gain)

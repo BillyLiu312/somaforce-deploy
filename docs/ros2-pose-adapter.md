@@ -150,6 +150,170 @@ rotations reverse their multiplication order when inverted.
 The generated file records both matrices and the solved common world transform.
 The adapter applies `T_calibration_mocap * T_mocap_marker * T_marker_policy`.
 
+## Redundant rigid-body markers
+
+The runtime can derive one torso or suitcase pose from multiple independently
+tracked rigid bodies. Each source needs its own fixed `T_marker_target` because
+NOKOV/VRPN assigns a different origin and orientation to every rigid body. Do
+not reuse one matrix for all three markers unless their frames are physically
+identical.
+
+Measure each marker pose in its target frame as `T_target_marker`: position in
+metres followed by target-frame XYZ RPY in degrees. Generate a v2 calibration
+by repeating each source argument:
+
+```bash
+.venv/bin/python scripts/make_marker_to_policy.py \
+  --torso-source robot1 /robot1/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --torso-source robot2 /robot2/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --torso-source robot3 /robot3/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --suitcase-source suitcase1 /suitcase1/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --suitcase-source suitcase2 /suitcase2/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --suitcase-source suitcase3 /suitcase3/pose <x> <y> <z> <roll> <pitch> <yaw> \
+  --output calibration/marker_policy_v2.json
+```
+
+The file stores each topic and its `marker_from_target` matrix under
+`marker_sources.torso` or `marker_sources.suitcase`. At runtime every fresh
+marker is independently converted with
+`T_world_target = T_world_mocap * T_mocap_marker * T_marker_target`.
+
+If one marker on each object already has a trusted transform in the old
+calibration, the remaining matrices can be solved from simultaneous stationary
+samples instead of being measured manually:
+
+```bash
+.venv/bin/python scripts/calibrate_redundant_markers.py \
+  --anchor-calibration calibration/marker_policy.json \
+  --torso-anchor robot1 --suitcase-anchor suitcase1 \
+  --torso-source robot1 /robot1/pose \
+  --torso-source robot2 /robot2/pose \
+  --torso-source robot3 /robot3/pose \
+  --suitcase-source suitcase1 /suitcase1/pose \
+  --suitcase-source suitcase2 /suitcase2/pose \
+  --suitcase-source suitcase3 /suitcase3/pose \
+  --samples 240 --output calibration/marker_policy_v2.json
+```
+
+All three rigid bodies on each object must be visible during calibration. The
+tool records residuals and marks the output invalid if the fixed relative-pose
+assumption is not supported. The anchor transform still determines the target
+frame, so choose an anchor whose old transform has already been validated.
+
+One visible source is sufficient. All sources in the selected consistent set
+are fused using a position mean and an SO(3) rotation mean; when all three are
+valid, the output is the three-marker mean. With three fresh sources, a single
+positional or angular outlier is excluded. If fresh sources conflict and no
+consensus can be established, no new pose is published and the existing stale
+watchdog fails closed. Sources also have to fall within the default 50 ms
+synchronization window to participate in the same fusion update, so an occluded
+marker stops influencing output before its full stale timeout.
+
+When the selected source set changes, the runtime preserves the previous output
+on the switch frame and decays the old-to-new local SE(3) alignment over 0.25 s.
+The new mean continues following live motion during that interval, avoiding a
+position or orientation step without applying a permanent low-pass lag. Set
+`--marker-source-switch-blend-s` to change the transition duration. The default
+consensus limits are 8 cm and 12 degrees; change them only
+from measured residuals using `--marker-position-consensus-m` and
+`--marker-orientation-consensus-deg`.
+
+The suitcase hardware launcher uses `suitcase4` as its preferred source. While
+that source remains inside the 50 ms synchronization window, its calibrated
+pose is used directly. When it is unavailable, the remaining suitcase sources
+fall back to the same consensus-and-mean algorithm, with a hardware-specific
+position limit of 12 cm and the unchanged 12 degree orientation limit. Pelvis
+fusion retains the default 8 cm position limit and has no preferred source.
+
+For a remounted suitcase marker set, keep a trusted `suitcase1` transform as the
+anchor and solve `suitcase2`/`suitcase3` from synchronized stationary samples:
+
+```bash
+ROS_DOMAIN_ID=42 ROS_LOCALHOST_ONLY=1 \
+.venv/bin/python scripts/calibrate_redundant_markers.py \
+  --role suitcase \
+  --anchor-calibration calibration/marker_policy.json \
+  --suitcase-anchor suitcase1 \
+  --suitcase-source suitcase1 /suitcase1/pose \
+  --suitcase-source suitcase2 /suitcase2/pose \
+  --suitcase-source suitcase3 /suitcase3/pose \
+  --samples 240 --output /tmp/suitcase_marker_calibration.json
+```
+
+An added extension marker should be solved independently against each existing
+trusted anchor. Accept it only when every fit passes and the independently
+anchored `marker_from_target` estimates agree. The deployed `suitcase4` entry
+uses the position mean and SO(3) mean of solutions anchored by suitcase1, 2,
+and 3; its recorded cross-validation limits are 30 mm and 5 degrees. Because
+the fusion source list is data-driven, adding `/suitcase4/pose` to
+`marker_sources.suitcase` automatically includes it in averaging, consensus,
+outlier rejection, and source-switch blending after the relay restarts.
+
+Pass the same v2 file to both relays:
+
+```bash
+.venv/bin/python scripts/ros2_pose_to_zmq.py \
+  --suitcase-only --transform-json calibration/marker_policy_v2.json
+.venv/bin/python scripts/ros2_torso_to_pelvis.py \
+  --torso-from-marker-json calibration/marker_policy_v2.json
+```
+
+The hardware launcher reads the source topics from this file and waits for any
+one torso source and any one suitcase source. Existing v1 single-marker files
+remain supported. Select the v2 file during bring-up with
+`bash scripts/run_suitcase_hardware.sh --calibration calibration/marker_policy_v2.json --check-only`.
+
+### Fast robot marker-set calibration
+
+The hardware launcher currently does not load the separate
+`marker_frame_corrections.json` layer. Robot marker changes are calibrated
+directly into `marker_sources.torso` in the main calibration file, avoiding a
+second runtime transform whose reference may be unstable.
+
+The normal workflow is to let the controller establish the robot side of the
+frame-0 relationship, then use the measured suitcase pose as the field anchor:
+
+```bash
+bash scripts/run_suitcase_hardware.sh --armed
+# type ARM, then i; after init completes, place the suitcase at frame 0 and type c
+```
+
+While G1 remains in the frame-0 init hold, `c` reads the actual fused suitcase
+pose and all three raw robot marker poses. The calibrator obtains the full
+suitcase-to-`torso_link` SE(3) reference from frame 0 of
+`assets/mujoco/reference/hdmi_suitcase/motion.npz` and computes:
+
+```text
+T_marker_torso = inverse(T_world_marker_measured)
+    * T_world_suitcase_measured
+    * T_suitcase_torso_frame0
+```
+
+This uses the actual suitcase location in the mocap world; it does not align the
+robot markers to a hard-coded world pose. `robot1`, `robot2`, and `robot3` must
+all remain visible and each must provide the full sample count; one valid
+suitcase marker is sufficient for the suitcase anchor. After a successful update the launcher
+exits so the next run reloads the new matrices. The standalone
+`--quick-calibrate-robot-markers` mode remains available when G1 is already
+held externally in the exact frame-0 pose; that mode is VRPN-only and never
+creates a G1 bridge or low-command publisher.
+
+Each robot marker-to-torso transform is solved independently from that marker's
+measured pose using the equation above. No old inter-marker relationship or
+missing-marker inference is used. If any one of the three robot markers is
+missing or unstable, the complete calibration is rejected without modifying
+the file. A successful run updates `calibration/marker_policy.json` atomically
+and first creates a timestamped
+`marker_policy.json.before-robot-marker-<UTC>` backup. Run `--check-only` after
+calibration and inspect multi-marker agreement before arming.
+
+During an armed interactive startup, a missing fused pelvis does not terminate
+the launcher because a bad robot-marker calibration must remain recoverable.
+The launcher keeps the robot in safe hold and exposes `i` followed by `c` for
+frame-0 recalibration. This exception applies only to the initial recovery
+check: `--check-only`, the `p` preflight, and the runtime watchdog still require
+a live pelvis stream before policy control can run.
+
 The adapter only transports poses. G1 joint state still comes from
 `scripts/g1/real_bridge.py` through Unitree DDS, and no pose stream can replace
 that low-state input.
@@ -218,6 +382,9 @@ have been verified:
 # Bounded read-only check; never creates rt/lowcmd or MotionSwitcher.
 bash scripts/run_suitcase_hardware.sh --check-only
 
+# VRPN-only frame-0 robot marker calibration; updates the selected calibration.
+bash scripts/run_suitcase_hardware.sh --quick-calibrate-robot-markers
+
 # Interactive zero/hold/init controller. Requires typing ARM before mode release.
 bash scripts/run_suitcase_hardware.sh --armed
 ```
@@ -226,13 +393,21 @@ Override the G1 interface when needed with `--interface <name>`. The launcher
 starts VRPN first, waits for both tracker topics, starts the G1 bridge and pose
 relays, then checks ports `5555`, `5561`, and `5590`. Armed startup keeps the
 bridge disarmed until the local controller has produced a fresh timestamped
-hold command.
+hold command. The normal read-only and armed paths use only the transforms in
+the selected calibration file; the separate marker correction file is muted.
+In an armed interactive session, pose relays remain alive across a complete
+marker dropout but publish no stale pose. They resume only after a valid live
+consensus returns. Every `s` and `p` command runs a fresh
+pelvis/suitcase/low-state preflight, and each policy runner independently
+enforces the 250 ms age limit, so keeping the relay process alive does not
+weaken fail-closed policy behavior.
 
 The armed prompt exposes only:
 
 - `z`: zero-policy/current-follow target with the configured HDMI PD gains;
 - `h`: latch and hold the current joint positions;
 - `i`: smoothly interpolate to suitcase motion frame 0 over 10 seconds;
+- `c`: use the measured suitcase pose to calibrate robot markers, then exit;
 - `q`: return to zero mode and stop the stack.
 
 The base `--armed` launcher does not load the suitcase ONNX and has no policy
@@ -245,7 +420,8 @@ bash scripts/run_suitcase_hardware.sh --armed --nominal-shadow
 ```
 
 Run `i`; the launcher waits for the 10-second initialization and reports when it
-is complete. Then enter `s`.
+is complete. Then enter `s`. Before loading ONNX, `s` runs the same one-second
+pelvis/suitcase/low-state preflight used by the apply path.
 Before `s`, place the suitcase at motion frame 0: the script checks the full
 pelvis-yaw-frame XY offset (not only distance), approximately `-0.793 m`
 relative height, and `1.95 deg` relative yaw. It fails closed when placement
@@ -275,7 +451,7 @@ is no authority blend, joint-position clipping, or target slew limit. This is
 intentional because HDMI outputs virtual PD setpoints, including setpoints
 beyond a mechanical joint range when it needs boundary torque. Non-finite or
 stale proposals, stale low-state, invalid sequence order, or observed joint
-speed above `12 rad/s` still switch control to a current-position hold. The
+speed above `18 rad/s` still switch control to a current-position hold. The
 `180 deg` tilt setting disables the absolute-tilt abort.
 
 Use this sequence:
@@ -289,37 +465,27 @@ Use this sequence:
    wrong. This pose differs from the earlier YAML-default init by as much as
    about `0.48 rad` on some joints.
 4. Place the suitcase at the already validated frame-0 relationship. Enter
-   `p`; the runner checks low-state, both corrected poses, the init error
-   (`<=0.50 rad`), and object placement before offering the second gate.
+   `p`; the launcher first runs a one-second `pelvis`/`suitcase`/`low_state`
+   stream preflight, then the runner checks freshness, init error
+   (`<=0.50 rad`), and object placement before offering the second gate. A
+   rejection prints the specific missing or stale stream, pose age, or measured
+   error and limit, plus the full log path.
 5. Type `FULL` to enable full-authority closed-loop policy stabilization while
    the motion reference remains frozen at frame 0. Confirm that the robot is
    supporting itself, then fully release the safety ropes without resetting the
-   policy. A marker occlusion during this stage does not immediately terminate
-   the run: for up to 30 seconds the runner keeps the last corrected pose,
-   continues policy inference and history updates against frozen motion frame 0,
-   and prints `MARKER OCCLUDED`; `GO` is rejected while the corrected pelvis or
-   suitcase pose is stale. When fresh poses return it prints `MARKER RESTORED`
-   and continues with live pose input without resetting the policy.
+   policy. Redundant markers are the only occlusion mechanism: losing one source
+   is acceptable while another calibrated source maintains a valid fused pose.
+   If all sources for either object are stale, or fresh sources have no valid
+   consensus, the relay stops publishing. After the configured stale timeout the
+   proposal process exits and the command controller switches to hold. The runner
+   never continues inference with a held, pelvis-attached, or reference-predicted
+   object pose.
 6. Type `GO` only after the ropes are clear. This starts the advancing 472-step
    sequence, which lasts about 9.5 seconds. During either stabilization or
    motion, type `h` followed by Enter to stop policy control and hold. Use the
    physical remote rather than waiting for terminal input if motion is unstable.
-   During motion, a pelvis-only marker dropout is tolerated for up to 2 seconds:
-   inference and the reference continue using the last pelvis pose so the deep
-   bend can pass through the occluded region. Fresh pelvis data is used
-   automatically when it returns. Suitcase dropout is handled only after the
-   reference contact flag is active and Vicon has measured at least 5 cm of
-   real suitcase lift. At that point the runner anchors the last measured
-   pelvis-to-suitcase transform and advances its relative motion from the
-   reference while following the live pelvis globally. Prediction starts after
-   60 ms without a new suitcase sample, before the general 250 ms stale gate,
-   so the observation does not freeze for many policy frames and then jump. It reports
-   `SUITCASE MARKER OCCLUDED AFTER CONFIRMED LIFT` and keeps inference running
-   until Vicon returns or the motion ends. Reacquisition switches directly back
-   to the corrected live pose and logs the position/orientation discrepancy.
-   A suitcase dropout before measured lift confirmation still terminates the
-   motion; this prevents a failed grasp from making a suitcase left on the
-   floor follow the robot synthetically.
+   The same live-only multi-marker rule applies during motion; there is no pelvis
+   grace period and no suitcase attachment fallback.
 7. After normal completion the launcher sends `h` automatically. Enter `q`
    only after confirming the robot is stationary and supported.
 
@@ -330,9 +496,20 @@ targets are in `nominal_pilot_applied.jsonl`, and process logs are in the same
 `outputs/suitcase_hardware/<timestamp>/` directory. A successful process exit
 only proves that the transport and anomaly gates ran; assess balance, contact,
 target tracking, and the applied log before another run.
-The inference NPZ includes a `phase` array (`stabilize`,
-`stabilize_pose_grace`, `motion_pose_grace`, `motion_object_fallback`, or
-`motion`), plus counters for each grace mode. `suitcase_pose_source` identifies
-`live`, `held_last`, and `reference_attached` inputs; `suitcase_pose_measured`
-retains the last raw corrected measurement, and reacquisition error fields make
-the substitution auditable.
+Apply rows are committed incrementally under the adjacent `*.recording/`
+directory. If the policy process is interrupted, the launcher rebuilds a
+readable partial NPZ from committed chunks instead of exposing a half-written
+ZIP archive.
+The inference NPZ records only live fused `pelvis_pose` and `suitcase_pose`.
+Its summary declares `pose_source=multi_marker_live_only`; the phase is limited
+to `stabilize`, `motion`, or `frozen`.
+
+For synchronized wrist F/T input and a paper-oriented record, add `--ft` and
+`--record-dir <local-directory>`. `--ft` starts the HPS adapter and defaults to
+Cross residual shadow. After `i`, keep the configured hands installed, remove
+other wrist loads, hold still, and enter `t`, then confirm `TARE`; F/T preflight
+must pass before `s` or `p`. Each attempt stores a
+policy-tick-aligned NPZ under `<local-directory>/<run-id>/`. Use
+`--residual-mode off` for logging only, or explicitly select `c1`/`c2` with
+`--nominal-apply` only after shadow review. Full calibration and field details
+are documented in [HPS wrist F/T adapter](./hps-ft-adapter.md).

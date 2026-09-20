@@ -68,6 +68,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'hps-ft-adapter',
+          label: 'HPS F/T Adapter',
+        },
+        {
+          type: 'doc',
           id: 'tracking_framework',
           label: 'Tracking Framework',
         },

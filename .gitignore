@@ -21,7 +21,12 @@ stubs
 !/tests/test_mujoco_ft.py
 !/tests/test_dh116s_keyboard_control.py
 !/tests/test_bfm_zero_observations.py
-!/tests/test_attached_object_pose.py
+!/tests/test_mocap_fusion.py
+!/tests/test_suitcase_safe_controller.py
+!/tests/test_nominal_shadow.py
+!/tests/test_pose_watchdog_startup.py
+!/tests/test_quick_calibrate_robot_markers.py
+!/tests/test_ft_adapter.py
 /third_party/*
 !/third_party/dh116s_sdk/
 /third_party/dh116s_sdk/*
