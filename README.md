@@ -11,6 +11,15 @@ sim2sim backend, and Unitree G1 I/O boundary.
 - HDMI student residual: the main zero-shot force-adaptation path.
 - Sonic baseline: Sonic nominal policy without HDMI object-state input.
 - Sonic residual: Sonic scaffold plus the same Cross residual.
+
+For the HDMI `push_door_hand` physical entry point, use
+`scripts/run_push_door_hand_hardware.sh`. It follows the suitcase hardware
+protocol but consumes separate `door` and `door_panel` VRPN poses and runs the
+573-frame door reference. `--param hdmi` (the default) runs the native HDMI
+student. `--param sonic` converts that native HDMI motion to an any4hdmi qpos
+tree and runs the Sonic G1 nominal baseline. Sonic currently emits 29-joint
+targets and is intentionally incompatible with the 23-action Cross residual;
+no G1/F-T/VRPN hardware test was performed for this implementation.
 - Shadow suffix: compute the residual but send nominal action only.
 
 The shared DeploymentStack is used for offline replay, MuJoCo, and hardware. Only

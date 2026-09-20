@@ -115,6 +115,13 @@ Repo skills 统一放在 `.agents/skills/`，无需手动复制到
 
 ## SomaForce 部署
 
+push_door_hand 真机入口为 `scripts/run_push_door_hand_hardware.sh`。它沿用
+suitcase 真机协议，但消费独立的 `door`、`door_panel` VRPN pose，并运行 573 帧
+door reference。默认 `--param hdmi` 使用原生 HDMI student；`--param sonic` 会
+把该原生 HDMI motion 转为 any4hdmi qpos tree，再运行 Sonic G1 nominal baseline。
+当前 Sonic 输出 29 维关节目标，与 23 维 Cross residual 不兼容；本次实现没有进行
+G1/F-T/VRPN 真机测试。
+
 本仓库同时保留 HDMI student、Sonic nominal 与共享 SomaForce Cross residual 的部署契约。
 详见 [SomaForce 部署说明](./docs/somaforce_deployment.md)。离线 replay、MuJoCo 和真机
 使用同一个 DeploymentStack，只替换 RobotIO 后端；请按 offline replay、MuJoCo sim2sim、

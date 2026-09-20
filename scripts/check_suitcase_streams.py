@@ -22,6 +22,10 @@ STREAMS = {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=float, default=3.0)
+    parser.add_argument("--object-name", default="suitcase")
+    parser.add_argument("--object-port", type=int, default=5561)
+    parser.add_argument("--aux-object-name", default=None)
+    parser.add_argument("--aux-object-port", type=int, default=5562)
     parser.add_argument(
         "--allow-missing",
         action="append",
@@ -37,23 +41,29 @@ def main() -> int:
     if args.duration <= 0:
         raise ValueError("duration must be positive")
 
+    streams = dict(STREAMS)
+    streams[args.object_name] = (args.object_port, PoseMessage.from_bytes)
+    if args.object_name != "suitcase":
+        streams.pop("suitcase", None)
+    if args.aux_object_name:
+        streams[args.aux_object_name] = (args.aux_object_port, PoseMessage.from_bytes)
     context = zmq.Context.instance()
     poller = zmq.Poller()
     sockets = {}
-    for name, (port, _) in STREAMS.items():
+    for name, (port, _) in streams.items():
         socket = context.socket(zmq.SUB)
         socket.setsockopt(zmq.SUBSCRIBE, b"")
         socket.connect(f"tcp://127.0.0.1:{port}")
         sockets[socket] = name
         poller.register(socket, zmq.POLLIN)
 
-    received = {name: [] for name in STREAMS}
+    received = {name: [] for name in streams}
     latest = {}
     deadline = time.monotonic() + args.duration
     while time.monotonic() < deadline:
         for socket, _ in poller.poll(timeout=20):
             name = sockets[socket]
-            latest[name] = STREAMS[name][1](socket.recv())
+            latest[name] = streams[name][1](socket.recv())
             received[name].append(time.monotonic())
 
     allowed_missing = set(args.allow_missing)
@@ -63,7 +73,9 @@ def main() -> int:
         print(f"{name}: frames={len(times)} rate={rate:.1f}Hz")
         if not times and name not in allowed_missing:
             failures.append(f"missing {name}")
-    for name in ("pelvis", "suitcase"):
+    for name in ("pelvis", args.object_name, args.aux_object_name):
+        if name is None:
+            continue
         if name not in latest:
             continue
         message = latest[name]

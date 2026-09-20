@@ -7,7 +7,7 @@ ONNX/TensorRT inference boundary, motion backends, and MuJoCo sim2sim loop.
 ## Runtime topology
 
 ```text
-HDMI student or Sonic nominal -> normalized a_nom[23]
+HDMI student -> normalized a_nom[23]; Sonic G1 nominal -> q_target[29]
     -> Cross F/T residual -> contact gain and authority
     -> safety/watchdog -> Unitree G1 or MuJoCo
 ```
@@ -20,7 +20,9 @@ and hardware. Only the RobotIO implementation changes.
 - `hdmi_student_baseline`: HDMI student only.
 - `hdmi_student_residual`: main zero-shot force-adaptation path.
 - `sonic_baseline`: Sonic without HDMI object-state input.
-- `sonic_residual`: Sonic scaffold plus the same Cross residual.
+- `sonic_residual`: reserved contract; the current Sonic G1 export emits 29
+  joint targets and is therefore nominal-only until a 23-action adapter is
+  explicitly validated.
 - `hdmi_student_residual_shadow` and `sonic_residual_shadow`: compute residual,
   send nominal action only.
 
@@ -40,9 +42,22 @@ takes `wrist_tokens[1,2,16,14]`, `proprio[1,64]`,
 `delta_a[1,23]`. F/T calibration, frame transforms, contact gating, authority
 ramping, and physical action scaling remain outside ONNX.
 
-Sonic reference conversion must pin 50 Hz timing, root-yaw alignment, future-step
-semantics, and the 23-joint mapping. Shape equality alone is not evidence of
-Sonic residual compatibility.
+Sonic reference conversion must pin 50 Hz timing, root-yaw alignment, and
+future-step semantics. The shared push-door hardware wrapper exposes
+`--param hdmi|sonic`; `sonic` converts the native HDMI body/joint motion into an
+any4hdmi qpos tree and publishes guarded 29-joint G1 proposals. It does not
+enable Cross residuals. Shape equality alone is not evidence of Sonic residual
+compatibility.
+
+## Push-door-hand hardware entry point
+
+The physical deployment script is `scripts/run_push_door_hand_hardware.sh`.
+It follows the suitcase script's VRPN, F/T, G1 bridge, hold/init, shadow, and
+guarded-pilot protocol, but subscribes to separate `door` and `door_panel`
+poses and runs the 573-frame HDMI reference. Use `--param hdmi` for the native
+student (default), or `--param sonic` for the Sonic nominal experiment. The
+host used for this implementation had no G1, F/T, or VRPN connection, so no
+hardware run is claimed here.
 
 ## Artifact verification
 

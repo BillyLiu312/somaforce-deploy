@@ -36,6 +36,11 @@ RESIDUAL_MODE=off
 RESIDUAL_MODE_SET=0
 RESIDUAL_MODEL="$REPO_ROOT/artifacts/hdmi_push_box/cross_residual.onnx"
 RECORD_DIR=""
+NOMINAL_BACKEND=hdmi
+SONIC_POLICY_CONFIG="$REPO_ROOT/checkpoints/sonic/release/g1/policy.yaml"
+SONIC_MODEL="$REPO_ROOT/checkpoints/sonic/release/g1/policy.onnx"
+SONIC_REFERENCE_MANIFEST="$REPO_ROOT/checkpoints/sonic/release/g1/manifest.json"
+SONIC_MOTION_ROOT="$REPO_ROOT/outputs/sonic_reference/hdmi_push_door_hand"
 
 POLICY_CONFIG="$REPO_ROOT/artifacts/hdmi_push_door_hand/hdmi_tag/policy.yaml"
 MODEL="$REPO_ROOT/artifacts/hdmi_push_door_hand/hdmi_tag/student.onnx"
@@ -48,7 +53,10 @@ usage() {
 Usage: $0 [--interface NAME] [--calibration FILE]
   [--door-calibration FILE] [--door-marker-role ROLE] [--door-panel-marker-role ROLE]
   [--quick-calibrate-robot-markers] [--armed]
-  [--nominal-shadow|--nominal-apply] [--ft] [--ft-calibration FILE]
+  [--param hdmi|sonic] [--nominal-backend hdmi|sonic]
+  [--nominal-shadow|--nominal-apply]
+  [--sonic-policy-config FILE] [--sonic-model FILE] [--sonic-motion-root DIR]
+  [--sonic-reference-manifest FILE] [--ft] [--ft-calibration FILE]
   [--ft-left-host HOST] [--ft-left-port PORT] [--ft-right-host HOST]
   [--ft-right-port PORT] [--ft-skip-tare]
   [--residual-mode off|shadow|c1|c2] [--residual-model FILE]
@@ -89,6 +97,12 @@ while (($#)); do
     --check-only) CHECK_ONLY=1; shift;;
     --nominal-shadow) NOMINAL_SHADOW=1; shift;;
     --nominal-apply) NOMINAL_APPLY=1; shift;;
+    --nominal-backend) NOMINAL_BACKEND="$2"; shift 2;;
+    --param) NOMINAL_BACKEND="$2"; shift 2;;
+    --sonic-policy-config) SONIC_POLICY_CONFIG="$2"; shift 2;;
+    --sonic-model) SONIC_MODEL="$2"; shift 2;;
+    --sonic-motion-root) SONIC_MOTION_ROOT="$2"; shift 2;;
+    --sonic-reference-manifest) SONIC_REFERENCE_MANIFEST="$2"; shift 2;;
     --ft) FT_ENABLED=1; shift;;
     --ft-calibration) FT_CALIBRATION="$2"; shift 2;;
     --ft-left-host) FT_LEFT_HOST="$2"; shift 2;;
@@ -105,6 +119,7 @@ while (($#)); do
 done
 
 if [[ -z "$DOOR_CALIBRATION" ]]; then DOOR_CALIBRATION="$CALIBRATION"; fi
+case "$NOMINAL_BACKEND" in hdmi|sonic) ;; *) echo "--nominal-backend must be hdmi or sonic" >&2; exit 2;; esac
 if ((NOMINAL_SHADOW && NOMINAL_APPLY)); then echo "choose one nominal mode" >&2; exit 2; fi
 if ((NOMINAL_SHADOW || NOMINAL_APPLY)) && ((!ARMED)); then
   echo "nominal mode requires --armed" >&2; exit 2
@@ -137,6 +152,22 @@ done
 if [[ "$RESIDUAL_MODE" == c1 || "$RESIDUAL_MODE" == c2 ]]; then
   .venv/bin/python scripts/run_hps_ft_adapter.py --calibration "$FT_CALIBRATION" \
     --require-residual-authority --validate-only
+fi
+
+if [[ "$NOMINAL_BACKEND" == sonic ]]; then
+  if [[ "$RESIDUAL_MODE" != off ]]; then
+    echo "Sonic backend currently supports nominal baseline only; residual mode is HDMI-only" >&2
+    exit 2
+  fi
+  for sonic_required in "$SONIC_POLICY_CONFIG" "$SONIC_MODEL" "$SONIC_REFERENCE_MANIFEST"; do
+    [[ -f "$sonic_required" ]] || { echo "Missing Sonic artifact: $sonic_required" >&2; exit 1; }
+  done
+  # SONIC consumes an any4hdmi qpos tree. This is the deliberate reference
+  # conversion from the native HDMI motion; it does not alter the HDMI path.
+  .venv/bin/python scripts/convert_hdmi_motion_to_any4hdmi.py \
+    --motion "$MOTION" --motion-meta "$MOTION_META" \
+    --reference-manifest "$SONIC_REFERENCE_MANIFEST" --out-dir "$SONIC_MOTION_ROOT" \
+    --name push_door_hand.npz
 fi
 
 # HARDWARE-ONLY DIFFERENCE: these checks are intentionally skipped only for
@@ -247,7 +278,8 @@ if ((ARMED)); then
   [[ -f "$RUNTIME_DIR/bridge.ready" ]] || { echo "G1 bridge did not become ready" >&2; exit 1; }
 fi
 sleep 2
-.venv/bin/python scripts/check_suitcase_streams.py --duration 3 | tee "$LOG_DIR/stream_check.log"
+.venv/bin/python scripts/check_suitcase_streams.py --duration 3 --object-name door --object-port 5561 \
+  --aux-object-name door_panel --aux-object-port 5562 | tee "$LOG_DIR/stream_check.log"
 if ((CHECK_ONLY)); then
   ((FT_ENABLED)) && .venv/bin/python scripts/run_hps_ft_adapter.py --calibration "$FT_CALIBRATION" --validate-only
   exit 0
@@ -257,6 +289,47 @@ if ((!ARMED)); then echo "Read-only push_door_hand stack is running. Press Ctrl-
 RUNNER_FT_ARGS=()
 if ((FT_ENABLED)); then RUNNER_FT_ARGS+=(--ft-port 5580 --ft-max-age-ms 100 --ft-calibration "$FT_CALIBRATION" \
   --require-both-ft-valid --residual-mode "$RESIDUAL_MODE"); [[ "$RESIDUAL_MODE" == off ]] || RUNNER_FT_ARGS+=(--residual "$RESIDUAL_MODEL"); fi
+
+run_nominal_shadow() {
+  local stem="$1"
+  if [[ "$NOMINAL_BACKEND" == sonic ]]; then
+    touch "$RUNTIME_DIR/proposal.start" "$RUNTIME_DIR/motion.start" "$RUNTIME_DIR/proposal.complete.ack"
+    .venv/bin/python scripts/run_sonic_nominal_proposal.py \
+      --policy-config "$SONIC_POLICY_CONFIG" --model "$SONIC_MODEL" \
+      --motion-root "$SONIC_MOTION_ROOT" --steps "$DOOR_STEPS" --rate 50 \
+      --proposal-port 5594 --ready-file "$RUNTIME_DIR/proposal.ready" \
+      --start-file "$RUNTIME_DIR/proposal.start" --motion-start-file "$RUNTIME_DIR/motion.start" \
+      --completion-file "$RUNTIME_DIR/proposal.complete" \
+      --completion-ack-file "$RUNTIME_DIR/proposal.complete.ack" --output "$stem.npz"
+  else
+    .venv/bin/python scripts/run_hdmi_suitcase_nominal_shadow.py --upstream-root ../sim2real-hdmi-upstream \
+      --policy-config "$POLICY_CONFIG" --model "$MODEL" --motion "$MOTION" --motion-meta "$MOTION_META" \
+      --object-name door --object-port 5561 --aux-object-name door_panel --aux-object-port 5562 \
+      --steps "$DOOR_STEPS" --rate 50 --output "$stem.npz" "${RUNNER_FT_ARGS[@]}"
+  fi
+}
+
+run_nominal_apply() {
+  local stem="$1"
+  if [[ "$NOMINAL_BACKEND" == sonic ]]; then
+    .venv/bin/python scripts/run_sonic_nominal_proposal.py \
+      --policy-config "$SONIC_POLICY_CONFIG" --model "$SONIC_MODEL" \
+      --motion-root "$SONIC_MOTION_ROOT" --steps "$DOOR_STEPS" --rate 50 \
+      --proposal-port 5594 --ready-file "$RUNTIME_DIR/proposal.ready" \
+      --start-file "$RUNTIME_DIR/proposal.start" --motion-start-file "$RUNTIME_DIR/motion.start" \
+      --completion-file "$RUNTIME_DIR/proposal.complete" \
+      --completion-ack-file "$RUNTIME_DIR/proposal.complete.ack" --output "$stem.npz"
+  else
+    .venv/bin/python scripts/run_hdmi_suitcase_nominal_shadow.py --upstream-root ../sim2real-hdmi-upstream \
+      --policy-config "$POLICY_CONFIG" --model "$MODEL" --motion "$MOTION" --motion-meta "$MOTION_META" \
+      --object-name door --object-port 5561 --aux-object-name door_panel --aux-object-port 5562 \
+      --steps "$DOOR_STEPS" --rate 50 --reference-mode advance --max-initial-error 0.50 \
+      --proposal-port 5594 --ready-file "$RUNTIME_DIR/proposal.ready" --start-file "$RUNTIME_DIR/proposal.start" \
+      --motion-start-file "$RUNTIME_DIR/motion.start" --pose-status-file "$RUNTIME_DIR/pose.status" \
+      --completion-file "$RUNTIME_DIR/proposal.complete" --completion-ack-file "$RUNTIME_DIR/proposal.complete.ack" \
+      --output "$stem.npz" "${RUNNER_FT_ARGS[@]}"
+  fi
+}
 echo "Door safe controller active. Commands: z=zero, h=hold, i=init, t=tare, s=shadow, p=pilot, q=quit"
 while kill -0 "$CONTROLLER_PID" 2>/dev/null; do
   read -r -p "push-door-safe> " command || command=q
@@ -269,23 +342,13 @@ while kill -0 "$CONTROLLER_PID" 2>/dev/null; do
     s|shadow)
       ((NOMINAL_SHADOW)) || { echo "restart with --armed --nominal-shadow"; continue; }
       STEM="$RECORD_OUTPUT_DIR/policy_shadow_$(date +%H%M%S)"
-      .venv/bin/python scripts/run_hdmi_suitcase_nominal_shadow.py --upstream-root ../sim2real-hdmi-upstream \
-        --policy-config "$POLICY_CONFIG" --model "$MODEL" --motion "$MOTION" --motion-meta "$MOTION_META" \
-        --object-name door --object-port 5561 --aux-object-name door_panel --aux-object-port 5562 \
-        --steps "$DOOR_STEPS" --rate 50 --output "$STEM.npz" "${RUNNER_FT_ARGS[@]}" \
+      run_nominal_shadow "$STEM" \
         >"$STEM.log" 2>&1 || tail -n 40 "$STEM.log" >&2;;
     p|pilot)
       ((NOMINAL_APPLY)) || { echo "restart with --armed --nominal-apply"; continue; }
       [[ "$(cat "$RUNTIME_DIR/controller.status" 2>/dev/null || true)" == init_complete ]] || { echo "press i first"; continue; }
       STEM="$RECORD_OUTPUT_DIR/policy_apply_$(date +%H%M%S)"; rm -f "$RUNTIME_DIR"/{proposal.ready,proposal.start,motion.start,pose.status,proposal.complete,proposal.complete.ack}
-      setsid .venv/bin/python scripts/run_hdmi_suitcase_nominal_shadow.py --upstream-root ../sim2real-hdmi-upstream \
-        --policy-config "$POLICY_CONFIG" --model "$MODEL" --motion "$MOTION" --motion-meta "$MOTION_META" \
-        --object-name door --object-port 5561 --aux-object-name door_panel --aux-object-port 5562 \
-        --steps "$DOOR_STEPS" --rate 50 --reference-mode advance --max-initial-error 0.50 \
-        --proposal-port 5594 --ready-file "$RUNTIME_DIR/proposal.ready" --start-file "$RUNTIME_DIR/proposal.start" \
-        --motion-start-file "$RUNTIME_DIR/motion.start" --pose-status-file "$RUNTIME_DIR/pose.status" \
-        --completion-file "$RUNTIME_DIR/proposal.complete" --completion-ack-file "$RUNTIME_DIR/proposal.complete.ack" \
-        --output "$STEM.npz" "${RUNNER_FT_ARGS[@]}" >"$STEM.log" 2>&1 & APPLY_PID="$!"; PIDS+=("$APPLY_PID")
+      (run_nominal_apply "$STEM") >"$STEM.log" 2>&1 & APPLY_PID="$!"; PIDS+=("$APPLY_PID")
       for _ in $(seq 1 300); do [[ -f "$RUNTIME_DIR/proposal.ready" ]] && break; sleep 0.1; done
       [[ -f "$RUNTIME_DIR/proposal.ready" ]] || { echo "door proposal failed" >&2; tail -n 40 "$STEM.log" >&2; continue; }
       echo p >&3; touch "$RUNTIME_DIR/proposal.start"; read -r -p "Type GO to start 573-step door motion: " go
