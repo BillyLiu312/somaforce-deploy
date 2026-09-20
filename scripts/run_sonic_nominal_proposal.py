@@ -21,7 +21,7 @@ import zmq
 
 from sim2real.rl_policy.base_policy import BasePolicyArgs
 from sim2real.rl_policy.tracking import Tracking, TrackingArgs
-from somaforce_deploy.nominal_proposal import NominalProposal
+from somaforce_deploy.nominal_proposal import SonicNominalProposal
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -116,7 +116,7 @@ def main() -> int:
             if tuple(policy.joint_names_simulation) != tuple(policy_args_for_g1(policy)):
                 raise RuntimeError("SONIC simulation joint order is not canonical G1")
             proposal_socket.send(
-                NominalProposal(
+                SonicNominalProposal(
                     source_time_ns=time.monotonic_ns(),
                     sequence=step + 1,
                     reference_step=step,

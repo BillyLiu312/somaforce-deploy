@@ -19,7 +19,7 @@ import zmq
 from sim2real.config.robots.g1 import G1_CFG
 from sim2real.rl_policy.robot_io.zmq import ZMQRobotIO
 from sim2real.utils.strings import resolve_matching_names_values
-from somaforce_deploy.nominal_proposal import NominalProposal
+from somaforce_deploy.nominal_proposal import NominalProposal, SonicNominalProposal, proposal_from_bytes
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -321,7 +321,7 @@ def _proposal_socket(port: int) -> zmq.Socket:
     return socket
 
 
-def _drain_proposal(socket: zmq.Socket | None) -> NominalProposal | None:
+def _drain_proposal(socket: zmq.Socket | None) -> NominalProposal | SonicNominalProposal | None:
     if socket is None:
         return None
     latest = None
@@ -330,7 +330,7 @@ def _drain_proposal(socket: zmq.Socket | None) -> NominalProposal | None:
             payload = socket.recv(flags=zmq.DONTWAIT)
         except zmq.Again:
             break
-        latest = NominalProposal.from_bytes(payload)
+        latest = proposal_from_bytes(payload)
     return latest
 
 
