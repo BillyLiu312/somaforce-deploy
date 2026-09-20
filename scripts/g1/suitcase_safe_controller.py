@@ -58,9 +58,11 @@ def _load_motion_init_pose(motion_path: Path, metadata_path: Path) -> np.ndarray
     if len(joint_names) != len(set(joint_names)):
         raise ValueError("motion metadata contains duplicate joint names")
     missing = [name for name in G1_CFG.joint_names if name not in joint_names]
-    extra = [name for name in joint_names if name not in G1_CFG.joint_names]
-    if missing or extra:
-        raise ValueError(f"motion joint names do not match G1: missing={missing} extra={extra}")
+    # Task references may include an articulated object joint (for example
+    # ``door_joint``).  The physical G1 controller only consumes the robot
+    # subset; reject missing robot joints but ignore reference-only joints.
+    if missing:
+        raise ValueError(f"motion joint names do not cover G1: missing={missing}")
     with np.load(motion_path) as motion:
         if "joint_pos" not in motion or motion["joint_pos"].ndim != 2:
             raise ValueError("motion must contain a two-dimensional joint_pos array")
