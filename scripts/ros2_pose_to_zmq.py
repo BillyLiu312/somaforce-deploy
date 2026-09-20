@@ -269,6 +269,11 @@ class _Relay:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suitcase-topic", default=DEFAULT_SUITCASE_TOPIC)
+    parser.add_argument(
+        "--marker-role",
+        default="suitcase",
+        help="calibration marker_sources role to use for this object relay",
+    )
     parser.add_argument("--pelvis-topic", default=DEFAULT_PELVIS_TOPIC)
     parser.add_argument(
         "--suitcase-only",
@@ -360,7 +365,7 @@ def main() -> int:
     source_groups = {
         "suitcase": load_marker_sources(
             calibration,
-            role="suitcase",
+            role=args.marker_role,
             legacy_topic=args.suitcase_topic,
             corrections=corrections,
         )

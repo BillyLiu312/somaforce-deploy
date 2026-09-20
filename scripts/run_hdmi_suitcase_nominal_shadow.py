@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run HDMI suitcase nominal inference in shadow or proposal-only mode."""
+"""Run HDMI nominal inference in shadow or proposal-only mode.
+
+The default profile remains the suitcase deployment.  ``--object-name`` and
+``--aux-object-name`` are used by the push-door-hand hardware wrapper so the
+same proposal/safety ABI can feed a different HDMI task.
+"""
 
 from __future__ import annotations
 
@@ -44,11 +49,7 @@ DEFAULT_ARTIFACT_DIR = REPO_ROOT / "artifacts/hdmi_move_suitcase/hdmi_tag"
 DEFAULT_MOTION = REPO_ROOT / "assets/mujoco/reference/hdmi_suitcase/motion.npz"
 DEFAULT_MOTION_META = REPO_ROOT / "assets/mujoco/reference/hdmi_suitcase/meta.json"
 DEFAULT_RESIDUAL = REPO_ROOT / "artifacts/hdmi_push_box/cross_residual.onnx"
-EXPECTED_INPUT_SHAPES = {
-    "command": (1, 356),
-    "policy": (1, 249),
-    "object": (1, 10),
-}
+EXPECTED_INPUT_SHAPES = {"command": (1, 356), "policy": (1, 249)}
 
 
 class ShadowCommandSender:
@@ -137,28 +138,28 @@ def _relative_xy(delta: np.ndarray, pelvis_quat: np.ndarray) -> np.ndarray:
 
 
 def _reference_placement(
-    motion_path: Path, meta_path: Path
+    motion_path: Path, meta_path: Path, object_name: str
 ) -> dict[str, float | list[float]]:
     metadata = json.loads(meta_path.read_text())
     with np.load(motion_path, allow_pickle=False) as motion:
         pelvis_index = metadata["body_names"].index("pelvis")
-        suitcase_index = metadata["body_names"].index("suitcase")
+        object_index = metadata["body_names"].index(object_name)
         pelvis_pos = np.asarray(motion["body_pos_w"][0, pelvis_index], dtype=np.float64)
-        suitcase_pos = np.asarray(
-            motion["body_pos_w"][0, suitcase_index], dtype=np.float64
+        object_pos = np.asarray(
+            motion["body_pos_w"][0, object_index], dtype=np.float64
         )
         pelvis_quat = np.asarray(
             motion["body_quat_w"][0, pelvis_index], dtype=np.float64
         )
-        suitcase_quat = np.asarray(
-            motion["body_quat_w"][0, suitcase_index], dtype=np.float64
+        object_quat = np.asarray(
+            motion["body_quat_w"][0, object_index], dtype=np.float64
         )
-    delta = suitcase_pos - pelvis_pos
+    delta = object_pos - pelvis_pos
     return {
         "xy_distance_m": float(np.linalg.norm(delta[:2])),
         "relative_xy_m": _relative_xy(delta, pelvis_quat).tolist(),
         "relative_z_m": float(delta[2]),
-        "relative_yaw_rad": _wrapped_angle(_yaw(suitcase_quat) - _yaw(pelvis_quat)),
+        "relative_yaw_rad": _wrapped_angle(_yaw(object_quat) - _yaw(pelvis_quat)),
     }
 
 
@@ -202,16 +203,16 @@ def _load_reference_states(motion_path: Path) -> dict[str, np.ndarray]:
 
 
 def _live_placement(
-    pelvis: np.ndarray, suitcase: np.ndarray
+    pelvis: np.ndarray, object_pose: np.ndarray
 ) -> dict[str, float | list[float]]:
-    delta = np.asarray(suitcase[:3], dtype=np.float64) - np.asarray(
+    delta = np.asarray(object_pose[:3], dtype=np.float64) - np.asarray(
         pelvis[:3], dtype=np.float64
     )
     return {
         "xy_distance_m": float(np.linalg.norm(delta[:2])),
         "relative_xy_m": _relative_xy(delta, pelvis[3:]).tolist(),
         "relative_z_m": float(delta[2]),
-        "relative_yaw_rad": _wrapped_angle(_yaw(suitcase[3:]) - _yaw(pelvis[3:])),
+        "relative_yaw_rad": _wrapped_angle(_yaw(object_pose[3:]) - _yaw(pelvis[3:])),
     }
 
 
@@ -311,6 +312,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-json", type=Path)
     parser.add_argument("--motion", type=Path, default=DEFAULT_MOTION)
     parser.add_argument("--motion-meta", type=Path, default=DEFAULT_MOTION_META)
+    parser.add_argument(
+        "--object-name",
+        default="suitcase",
+        help="primary mocap body used by the policy (default: suitcase)",
+    )
+    parser.add_argument(
+        "--object-port", type=int, default=5561,
+        help="ZMQ port for the primary object pose",
+    )
+    parser.add_argument(
+        "--aux-object-name",
+        default=None,
+        help="optional second mocap body required by object observations",
+    )
+    parser.add_argument("--aux-object-port", type=int, default=5562)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--steps", type=int, default=472)
     parser.add_argument("--rate", type=float, default=50.0)
@@ -369,6 +385,14 @@ def main() -> int:
         raise ValueError("steps, rates, thread counts, and F/T max age must be positive")
     if not 0 <= args.ft_port <= 65535:
         raise ValueError("ft-port must be 0 or a valid TCP port")
+    if not 1 <= args.object_port <= 65535 or not 1 <= args.aux_object_port <= 65535:
+        raise ValueError("object ports must be valid TCP ports")
+    if args.object_name == "pelvis" or args.aux_object_name == "pelvis":
+        raise ValueError("object names must differ from pelvis")
+    if args.aux_object_name and args.aux_object_name == args.object_name:
+        raise ValueError("primary and auxiliary object names must differ")
+    if args.aux_object_name and args.aux_object_port == args.object_port:
+        raise ValueError("primary and auxiliary object ports must differ")
     if args.require_both_ft_valid and args.ft_port == 0:
         raise ValueError("--require-both-ft-valid requires --ft-port")
     if args.ft_calibration is not None:
@@ -471,6 +495,15 @@ def main() -> int:
             model_json = model_path.parent / "policy.json"
         if not model_json.is_file():
             raise FileNotFoundError(f"HDMI model metadata is missing: {model_json}")
+        model_metadata = json.loads(model_json.read_text())
+        model_input_shapes = model_metadata.get("in_shapes", [[[], [], []]])[0]
+        if len(model_input_shapes) != 3:
+            raise ValueError("HDMI model metadata must describe command, policy, and object inputs")
+        expected_input_shapes = {
+            "command": tuple(model_input_shapes[0]),
+            "policy": tuple(model_input_shapes[1]),
+            "object": tuple(model_input_shapes[2]),
+        }
         if model_json != model_path.with_suffix(".json"):
             copied_model = Path(temp_dir) / model_path.name
             shutil.copy2(model_path, copied_model)
@@ -498,7 +531,7 @@ def main() -> int:
                 )
             print(
                 "nominal shadow contract: "
-                f"inputs={EXPECTED_INPUT_SHAPES} action={(1, policy.num_actions)} "
+                f"inputs={expected_input_shapes} action={(1, policy.num_actions)} "
                 f"joints={policy.num_dofs} command_sender=disabled "
                 f"ft_port={args.ft_port} residual_mode={args.residual_mode}"
             )
@@ -507,8 +540,12 @@ def main() -> int:
         context = zmq.Context.instance()
         pose_sockets = {
             "pelvis": _pose_monitor(context, 5555),
-            "suitcase": _pose_monitor(context, 5561),
+            args.object_name: _pose_monitor(context, args.object_port),
         }
+        if args.aux_object_name:
+            pose_sockets[args.aux_object_name] = _pose_monitor(
+                context, args.aux_object_port
+            )
         latest_pose: dict[str, np.ndarray] = {}
         latest_pose_time = {name: 0.0 for name in pose_sockets}
         ft_receiver = (
@@ -520,9 +557,12 @@ def main() -> int:
         policy.perf_dict = {}
         deadline = time.monotonic() + args.startup_timeout
         low_state_ready = False
+        required_pose_names = {"pelvis", args.object_name}
+        if args.aux_object_name:
+            required_pose_names.add(args.aux_object_name)
         policy_pose_missing = [
             f"{name}_{field}"
-            for name in ("pelvis", "suitcase")
+            for name in sorted(required_pose_names)
             for field in ("pos", "quat")
         ]
         while time.monotonic() < deadline:
@@ -548,7 +588,7 @@ def main() -> int:
                     latest_ft_frame = None
             policy_pose_missing = [
                 f"{name}_{field}"
-                for name in ("pelvis", "suitcase")
+                for name in sorted(required_pose_names)
                 for field in ("pos", "quat")
                 if policy.state_processor.get_mocap_data(f"{name}_{field}") is None
             ]
@@ -592,11 +632,15 @@ def main() -> int:
         initial_error = float(np.max(np.abs(current - motion_init)))
         if initial_error > args.max_initial_error:
             raise RuntimeError(
-                f"robot is not at suitcase init pose: max error {initial_error:.3f} rad "
+                f"robot is not at {args.object_name} init pose: max error {initial_error:.3f} rad "
                 f"> {args.max_initial_error:.3f} rad"
             )
-        reference_placement = _reference_placement(args.motion, args.motion_meta)
-        live_placement = _live_placement(latest_pose["pelvis"], latest_pose["suitcase"])
+        reference_placement = _reference_placement(
+            args.motion, args.motion_meta, args.object_name
+        )
+        live_placement = _live_placement(
+            latest_pose["pelvis"], latest_pose[args.object_name]
+        )
         placement_error = {
             "relative_xy_m": float(
                 np.linalg.norm(
@@ -633,7 +677,7 @@ def main() -> int:
                 for name in failed_placement
             )
             raise RuntimeError(
-                "suitcase frame-0 placement check failed: "
+                f"{args.object_name} frame-0 placement check failed: "
                 f"{failure_details}; live={live_placement}; "
                 f"reference={reference_placement}"
             )
@@ -680,7 +724,7 @@ def main() -> int:
             )
 
         # The upstream observation objects read mocap through this method. A
-        # local override lets the runner provide one coherent live pose pair.
+        # local override lets the runner provide one coherent live pose set.
         effective_mocap_data: dict[str, np.ndarray] = {}
         original_get_mocap_data = policy.state_processor.get_mocap_data
 
@@ -733,6 +777,7 @@ def main() -> int:
                 "low_state_age_s",
                 "pelvis_age_s",
                 "suitcase_age_s",
+                "object_age_s",
                 "inference_ms",
                 "residual_inference_ms",
                 "policy_total_ms",
@@ -749,6 +794,8 @@ def main() -> int:
                 "joint_torque",
                 "pelvis_pose",
                 "suitcase_pose",
+                "object_pose",
+                "aux_object_pose",
                 "target_joint_pos",
                 "target_joint_vel",
                 "target_body_pos_w",
@@ -950,18 +997,17 @@ def main() -> int:
 
             live_pose = {name: value.copy() for name, value in latest_pose.items()}
 
-            effective_mocap_data.update(
-                {
-                    "pelvis_pos": live_pose["pelvis"][:3],
-                    "pelvis_quat": live_pose["pelvis"][3:],
-                    "suitcase_pos": live_pose["suitcase"][:3],
-                    "suitcase_quat": live_pose["suitcase"][3:],
-                }
-            )
+            effective_mocap_data["pelvis_pos"] = live_pose["pelvis"][:3]
+            effective_mocap_data["pelvis_quat"] = live_pose["pelvis"][3:]
+            for pose_name, pose in live_pose.items():
+                if pose_name == "pelvis":
+                    continue
+                effective_mocap_data[f"{pose_name}_pos"] = pose[:3]
+                effective_mocap_data[f"{pose_name}_quat"] = pose[3:]
 
             policy.update()
             observations = policy.prepare_obs_for_rl()
-            for name, expected_shape in EXPECTED_INPUT_SHAPES.items():
+            for name, expected_shape in expected_input_shapes.items():
                 value = np.asarray(observations[name], dtype=np.float32)
                 if value.shape != expected_shape or not np.isfinite(value).all():
                     raise RuntimeError(
@@ -1087,7 +1133,8 @@ def main() -> int:
             records["low_state_tick"].append(tick)
             records["low_state_age_s"].append(low_state_age)
             records["pelvis_age_s"].append(pose_ages["pelvis"])
-            records["suitcase_age_s"].append(pose_ages["suitcase"])
+            records["suitcase_age_s"].append(pose_ages.get("suitcase", pose_ages[args.object_name]))
+            records["object_age_s"].append(pose_ages[args.object_name])
             records["inference_ms"].append(inference_ms)
             records["residual_inference_ms"].append(residual_inference_ms)
             records["policy_total_ms"].append(policy_total_ms)
@@ -1102,7 +1149,13 @@ def main() -> int:
             records["root_ang_vel"].append(policy.state_processor.root_ang_vel_b.copy())
             records["joint_torque"].append(joint_torque.copy())
             records["pelvis_pose"].append(live_pose["pelvis"].copy())
-            records["suitcase_pose"].append(live_pose["suitcase"].copy())
+            records["suitcase_pose"].append(live_pose.get("suitcase", live_pose[args.object_name]).copy())
+            records["object_pose"].append(live_pose[args.object_name].copy())
+            records["aux_object_pose"].append(
+                live_pose[args.aux_object_name].copy()
+                if args.aux_object_name
+                else np.full(7, np.nan, dtype=np.float32)
+            )
             for key in (
                 "joint_pos",
                 "joint_vel",
@@ -1244,8 +1297,10 @@ def main() -> int:
             for name in ("policy_ood_ratio", "command_ood_ratio", "object_ood_ratio")
         }
         summary = {
-            "schema": "somaforce_hdmi_suitcase_hardware_record_v4",
+            "schema": "somaforce_hdmi_nominal_hardware_record_v1",
             "complete": True,
+            "object_name": args.object_name,
+            "aux_object_name": args.aux_object_name,
             "result": "pass" if violation_count == 0 else "review",
             "steps": int(arrays["time_ns"].shape[0]),
             "motion_steps": args.steps,
@@ -1340,6 +1395,7 @@ def main() -> int:
             "low_state_age_ms_max": float(np.max(arrays["low_state_age_s"]) * 1000.0),
             "pelvis_age_ms_max": float(np.max(arrays["pelvis_age_s"]) * 1000.0),
             "suitcase_age_ms_max": float(np.max(arrays["suitcase_age_s"]) * 1000.0),
+            "object_age_ms_max": float(np.max(arrays["object_age_s"]) * 1000.0),
         }
         metadata = {
             "schema": summary["schema"],
