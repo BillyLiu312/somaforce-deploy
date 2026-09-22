@@ -115,12 +115,20 @@ Repo skills 统一放在 `.agents/skills/`，无需手动复制到
 
 ## SomaForce 部署
 
-push_door_hand 真机入口为 `scripts/run_push_door_hand_hardware.sh`。它沿用
-suitcase 真机协议，但消费独立的 `door`、`door_panel` VRPN pose，并运行 573 帧
-door reference。默认 `--param hdmi` 使用原生 HDMI student；`--param sonic` 会
-把该原生 HDMI motion 转为 any4hdmi qpos tree，再运行 Sonic G1 nominal baseline。
-当前 Sonic 输出 29 维关节目标，与 23 维 Cross residual 不兼容；本次实现没有进行
-G1/F-T/VRPN 真机测试。
+push_door_hand 真机入口为 `scripts/run_push_door_hand_hardware.sh`，command policy
+已经收敛为 Sonic-only。脚本把原生 573 帧 HDMI reference 转为 any4hdmi qpos tree，
+运行 29 维 Sonic G1 ONNX，再把受保护的 SNP2 proposal 交给唯一的 G1 command owner。
+所有真机模式都强制要求双腕 F/T；F/T 不进入 Sonic ONNX，但 raw/transformed
+wrench、token、时序、机器人状态、policy observation、action、target 和原生 HDMI
+reference 会同步记录。记录每 25 帧原子提交一个 chunk；runner 硬崩溃后可用
+`scripts/finalize_chunked_record.py` 恢复 partial NPZ。Sonic 不启动 ROS/VRPN
+client 或 marker relay；F/T adapter 使用 low-state 运动学与 `--no-pelvis`。
+G1/F-T read-only preflight 已完成实机验证，policy shadow/apply 仍需分阶段验收。
+apply 默认启用 joint-limit clipping 与 `0.08 rad/tick` target slew limit；direct
+policy 开关仍以注释形式保留在 launcher 中。raw Sonic proposal 超出 joint limit
+超过 `0.05` rad 或单帧跳变超过 `0.50` rad 时会 fail closed。运行时 F/T 掉线只
+输出 warning，并以 quality-zero 行写入记录，不会中断 nominal control。原始 HDMI
+文件保持不变；部署 cache 默认使用 2 倍时间插值和 9 帧 Savitzky-Golay 平滑。
 
 本仓库同时保留 HDMI student、Sonic nominal 与共享 SomaForce Cross residual 的部署契约。
 详见 [SomaForce 部署说明](./docs/somaforce_deployment.md)。离线 replay、MuJoCo 和真机

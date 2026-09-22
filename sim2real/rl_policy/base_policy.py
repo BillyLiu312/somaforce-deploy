@@ -10,7 +10,7 @@ import yaml
 from loguru import logger
 
 from sim2real.config.robots import get_robot_cfg
-from sim2real.rl_policy.controllers.base import ControllerBase
+from sim2real.rl_policy.controllers.base import ControllerBase, NoopController
 from sim2real.rl_policy.controllers.keyboard import KeyboardController
 from sim2real.rl_policy.controllers.pico import PicoController
 from sim2real.rl_policy.controllers.unitree_joystick import UnitreeJoystickController
@@ -78,6 +78,7 @@ class BasePolicy:
             robot_name=args.robot,
             robot_cfg=self.robot_cfg,
             interface=args.robot_interface,
+            command_output=args.robot_io_command_output,
         )
 
         self.state_processor = StateProcessor(
@@ -184,6 +185,9 @@ class BasePolicy:
         self.pico_controller = None
 
         controller_type = self.controller_type
+        if controller_type == "none":
+            return NoopController()
+
         if controller_type == "keyboard":
             print("Using keyboard")
             self.keyboard_controller = KeyboardController()
@@ -636,8 +640,9 @@ class BasePolicyArgs:
     rl_rate: float = 50.0
     inference_backend: Literal["onnx-gpu", "onnx-cpu", "tensorrt"] = "onnx-cpu"
     robot_io: Literal["inline", "zmq"] = "zmq"
+    robot_io_command_output: bool = True
     robot_interface: str = "eth0"
-    controller: Literal["keyboard", "joystick", "pico"] = "keyboard"
+    controller: Literal["none", "keyboard", "joystick", "pico"] = "keyboard"
     pico_zmq_connect: str = f"tcp://127.0.0.1:{PORTS['pico_controller']}"
     record: bool = False
     record_output: str | None = None

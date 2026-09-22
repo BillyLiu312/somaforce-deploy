@@ -39,19 +39,29 @@ actor_adapt(command[356], policy[249], priv_pred[256]) -> action[23]
 `previous_a_total[1,23]`，输出 normalized `delta_a[1,23]`。F/T 标定、坐标变换、
 接触门控、authority ramp 和物理 action scaling 保持在 ONNX 图外。
 
-Sonic reference 转换必须固定 50 Hz、root-yaw 对齐和 future-step 语义。共享的
-push-door 真机脚本提供 `--param hdmi|sonic`：`sonic` 会把原生 HDMI 的
-body/joint motion 转换为 any4hdmi qpos tree，并发布受安全控制器保护的 29 维
-G1 proposal；它不会启用 Cross residual。仅凭 shape 相等不能证明 Sonic residual
-兼容。
+Sonic reference 转换必须固定 50 Hz、root-yaw 对齐和 future-step 语义。
+push-door 真机脚本已经收敛为 Sonic-only：它把原生 HDMI body/joint motion 转为
+any4hdmi qpos tree，并发布受安全控制器保护的 29 维 G1 proposal。所有真机模式
+都必须启用并同步记录双腕 F/T，但 F/T 不会进入 Sonic ONNX。仅凭 shape 相等不能证明 Sonic
+residual 兼容。
 
 ## Push-door-hand 真机入口
 
 真机脚本是 `scripts/run_push_door_hand_hardware.sh`。它沿用 suitcase 脚本的
-VRPN、F/T、G1 bridge、hold/init、shadow 和 guarded-pilot 流程，但订阅独立的
-`door` 与 `door_panel` pose，并运行 573 帧 HDMI reference。默认
-`--param hdmi` 使用原生 student，`--param sonic` 启动 Sonic nominal 实验。
-本次实现时本机没有连接 G1、F/T 或 VRPN，因此没有声称完成真机测试。
+F/T、G1 bridge、hold/init、shadow 和 guarded-pilot 流程，但不会启动 ROS/VRPN
+服务或 marker relay。Sonic 使用 G1 proprioception 与 573 帧 HDMI reference；
+F/T adapter 使用 low-state 运动学与 `--no-pelvis`。policy/F-T 记录每 25 帧原子
+提交一个 chunk；普通异常和终止信号会自动生成 partial NPZ，`SIGKILL` 或掉电后
+可运行 `scripts/finalize_chunked_record.py --output <record>.npz` 恢复。G1/F-T
+read-only preflight 已完成实机验证，shadow/apply 仍需分阶段验收。
+
+默认 pilot 保留 safe controller 的 joint-limit clipping 与 `0.08 rad/tick`
+target slew limit；`--direct-policy-targets` 仍以注释形式保留，后续验收通过后可恢复。
+raw Sonic target 超出 joint limit 超过 `0.05 rad` 或单 tick 跳变超过 `0.50 rad`
+时会在发布前 fail closed；controller 出现 `pilot_abort:*` 时 launcher 会立即停止
+runner。运行时 F/T 无效只输出 warning，并以 quality-zero 数据保存。原始 HDMI
+NPZ 不会被修改；生成的部署 cache 默认使用 2 倍时间插值和 9 帧
+Savitzky-Golay 平滑。
 
 ## Artifact 校验
 

@@ -19,11 +19,13 @@ class ZMQRobotIO(RobotIO):
         robot_cfg: RobotCfg,
         *,
         context: zmq.Context | None = None,
+        command_output: bool = True,
     ) -> None:
         self._joint_count = len(robot_cfg.joint_names)
         self._command_sequence = 0
         self._context = context or zmq.Context.instance()
         self._latest_state: RobotState | None = None
+        self._command_output = bool(command_output)
 
         state_endpoint = f"tcp://{robot_cfg.low_state_host}:{robot_cfg.low_state_port}"
         self._state_socket = self._context.socket(zmq.SUB)
@@ -35,10 +37,12 @@ class ZMQRobotIO(RobotIO):
         command_endpoint = (
             f"tcp://{robot_cfg.low_cmd_bind_addr}:{robot_cfg.low_cmd_port}"
         )
-        self._command_socket = self._context.socket(zmq.PUB)
-        self._command_socket.setsockopt(zmq.SNDHWM, 1)
-        self._command_socket.setsockopt(zmq.LINGER, 0)
-        self._command_socket.bind(command_endpoint)
+        self._command_socket: zmq.Socket | None = None
+        if self._command_output:
+            self._command_socket = self._context.socket(zmq.PUB)
+            self._command_socket.setsockopt(zmq.SNDHWM, 1)
+            self._command_socket.setsockopt(zmq.LINGER, 0)
+            self._command_socket.bind(command_endpoint)
 
     def read_state(self) -> RobotState | None:
         while True:
@@ -63,6 +67,8 @@ class ZMQRobotIO(RobotIO):
         kp: np.ndarray,
         kd: np.ndarray,
     ) -> None:
+        if self._command_socket is None:
+            raise RuntimeError("read-only ZMQRobotIO cannot write commands")
         self._command_sequence += 1
         message = LowCmdMessage(
             q_target,
@@ -80,7 +86,8 @@ class ZMQRobotIO(RobotIO):
 
     def close(self) -> None:
         self._state_socket.close(linger=0)
-        self._command_socket.close(linger=0)
+        if self._command_socket is not None:
+            self._command_socket.close(linger=0)
 
     def _message_to_state(self, message: LowStateMessage) -> RobotState:
         if message.joint_positions.size != self._joint_count:

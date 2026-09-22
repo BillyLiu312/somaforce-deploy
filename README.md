@@ -12,14 +12,25 @@ sim2sim backend, and Unitree G1 I/O boundary.
 - Sonic baseline: Sonic nominal policy without HDMI object-state input.
 - Sonic residual: Sonic scaffold plus the same Cross residual.
 
-For the HDMI `push_door_hand` physical entry point, use
-`scripts/run_push_door_hand_hardware.sh`. It follows the suitcase hardware
-protocol but consumes separate `door` and `door_panel` VRPN poses and runs the
-573-frame door reference. `--param hdmi` (the default) runs the native HDMI
-student. `--param sonic` converts that native HDMI motion to an any4hdmi qpos
-tree and runs the Sonic G1 nominal baseline. Sonic currently emits 29-joint
-targets and is intentionally incompatible with the 23-action Cross residual;
-no G1/F-T/VRPN hardware test was performed for this implementation.
+The `push_door_hand` physical entry point is
+`scripts/run_push_door_hand_hardware.sh`. Its command policy is SONIC-only: it
+converts the native 573-frame HDMI reference to an any4hdmi qpos tree, runs the
+29-joint SONIC G1 ONNX, and feeds guarded SNP2 proposals to the sole G1 command
+owner. Both wrist F/T streams are mandatory for every hardware run. F/T does
+not enter the SONIC ONNX; raw/transformed wrench, tokens, timing, robot state,
+policy observations, actions, targets, and the original HDMI reference are
+recorded together. Records are committed in atomic 25-frame chunks and can be
+finalized after a hard runner crash with `scripts/finalize_chunked_record.py`.
+SONIC starts no ROS/VRPN client or marker relay; the F/T adapter runs with
+low-state kinematics and `--no-pelvis`. The read-only G1/F-T preflight has been
+verified on hardware; policy shadow/apply remain separate acceptance stages.
+Apply defaults to joint-limit clipping and a `0.08 rad/tick` target slew limit;
+the direct-policy switch remains in the launcher as a commented opt-in. Raw
+SONIC proposals fail closed when they exceed joint limits by more than `0.05`
+rad or jump by more than `0.50` rad. Runtime F/T dropouts emit warnings and
+quality-zero record rows without aborting nominal control. The source HDMI file
+is unchanged; the deploy cache uses 2x time interpolation and a nine-frame
+Savitzky-Golay smoothing window by default.
 - Shadow suffix: compute the residual but send nominal action only.
 
 The shared DeploymentStack is used for offline replay, MuJoCo, and hardware. Only

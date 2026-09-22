@@ -13,9 +13,12 @@ def create_robot_io(
     robot_name: str,
     robot_cfg: RobotCfg,
     interface: str,
+    command_output: bool = True,
 ) -> RobotIO:
     if mode == "zmq":
-        return ZMQRobotIO(robot_cfg)
+        if command_output:
+            return ZMQRobotIO(robot_cfg)
+        return ZMQRobotIO(robot_cfg, command_output=False)
 
     if mode != "inline":
         raise ValueError(f"Unsupported robot_io: {mode}")

@@ -139,6 +139,24 @@ def test_zmq_robot_io_writes_existing_low_command_abi_and_closes() -> None:
     assert context.command_socket.closed
 
 
+def test_zmq_robot_io_read_only_does_not_open_command_output() -> None:
+    context = FakeContext()
+    backend = ZMQRobotIO(  # type: ignore[arg-type]
+        DummyRobotCfg(), context=context, command_output=False
+    )
+    context.state_socket.received.append(_low_state_bytes())
+
+    assert backend.read_state() is not None
+    assert context.command_socket.bound is None
+    with pytest.raises(RuntimeError, match="read-only"):
+        zeros = np.zeros(2, dtype=np.float32)
+        backend.write_command(zeros, zeros, zeros, zeros, zeros)
+
+    backend.close()
+    assert context.state_socket.closed
+    assert not context.command_socket.closed
+
+
 def test_low_cmd_message_metadata_footer_roundtrip() -> None:
     message = LowCmdMessage(
         np.array([1.0, 2.0], dtype=np.float32),
@@ -390,8 +408,15 @@ def test_factory_rejects_unknown_mode_and_inline_robot() -> None:
 
 def test_factory_selects_zmq_and_g1_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     zmq_backend = object()
+    read_only_zmq_backend = object()
     g1_backend = object()
-    monkeypatch.setattr(robot_io_factory, "ZMQRobotIO", lambda cfg: zmq_backend)
+    monkeypatch.setattr(
+        robot_io_factory,
+        "ZMQRobotIO",
+        lambda cfg, command_output=True: (
+            zmq_backend if command_output else read_only_zmq_backend
+        ),
+    )
     monkeypatch.setattr(g1_module, "G1RobotIO", lambda cfg, interface: g1_backend)
 
     assert create_robot_io(
@@ -400,6 +425,13 @@ def test_factory_selects_zmq_and_g1_backends(monkeypatch: pytest.MonkeyPatch) ->
         robot_cfg=DummyRobotCfg(),  # type: ignore[arg-type]
         interface="ignored",
     ) is zmq_backend
+    assert create_robot_io(
+        mode="zmq",
+        robot_name="anything",
+        robot_cfg=DummyRobotCfg(),  # type: ignore[arg-type]
+        interface="ignored",
+        command_output=False,
+    ) is read_only_zmq_backend
     assert create_robot_io(
         mode="inline",
         robot_name="G1",

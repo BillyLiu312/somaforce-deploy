@@ -22,6 +22,11 @@ STREAMS = {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=float, default=3.0)
+    parser.add_argument(
+        "--low-state-only",
+        action="store_true",
+        help="check only the G1 low-state stream; do not open pose subscribers",
+    )
     parser.add_argument("--object-name", default="suitcase")
     parser.add_argument("--object-port", type=int, default=5561)
     parser.add_argument("--aux-object-name", default=None)
@@ -42,11 +47,17 @@ def main() -> int:
         raise ValueError("duration must be positive")
 
     streams = dict(STREAMS)
-    streams[args.object_name] = (args.object_port, PoseMessage.from_bytes)
-    if args.object_name != "suitcase":
-        streams.pop("suitcase", None)
-    if args.aux_object_name:
-        streams[args.aux_object_name] = (args.aux_object_port, PoseMessage.from_bytes)
+    if args.low_state_only:
+        streams = {"low_state": STREAMS["low_state"]}
+    else:
+        streams[args.object_name] = (args.object_port, PoseMessage.from_bytes)
+        if args.object_name != "suitcase":
+            streams.pop("suitcase", None)
+        if args.aux_object_name:
+            streams[args.aux_object_name] = (
+                args.aux_object_port,
+                PoseMessage.from_bytes,
+            )
     context = zmq.Context.instance()
     poller = zmq.Poller()
     sockets = {}

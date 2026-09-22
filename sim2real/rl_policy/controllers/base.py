@@ -19,3 +19,12 @@ class ControllerBase(ABC):
     def close(self) -> None:
         """Release runtime resources such as listener threads."""
         return None
+
+
+class NoopController(ControllerBase):
+    """Controller for externally orchestrated policy runners."""
+
+    name = "none"
+
+    def get_control_mode(self) -> ControlMode | None:
+        return None

@@ -43,21 +43,34 @@ takes `wrist_tokens[1,2,16,14]`, `proprio[1,64]`,
 ramping, and physical action scaling remain outside ONNX.
 
 Sonic reference conversion must pin 50 Hz timing, root-yaw alignment, and
-future-step semantics. The shared push-door hardware wrapper exposes
-`--param hdmi|sonic`; `sonic` converts the native HDMI body/joint motion into an
-any4hdmi qpos tree and publishes guarded 29-joint G1 proposals. It does not
-enable Cross residuals. Shape equality alone is not evidence of Sonic residual
-compatibility.
+future-step semantics. The push-door hardware wrapper is SONIC-only: it
+converts the native HDMI body/joint motion into an any4hdmi qpos tree and
+publishes guarded 29-joint G1 proposals. Both wrist F/T streams are required
+for every hardware mode and recorded for synchronized audit, but do not enter
+the SONIC ONNX. Shape
+equality alone is not evidence of Sonic residual compatibility.
 
 ## Push-door-hand hardware entry point
 
 The physical deployment script is `scripts/run_push_door_hand_hardware.sh`.
-It follows the suitcase script's VRPN, F/T, G1 bridge, hold/init, shadow, and
-guarded-pilot protocol, but subscribes to separate `door` and `door_panel`
-poses and runs the 573-frame HDMI reference. Use `--param hdmi` for the native
-student (default), or `--param sonic` for the Sonic nominal experiment. The
-host used for this implementation had no G1, F/T, or VRPN connection, so no
-hardware run is claimed here.
+It follows the suitcase script's F/T, G1 bridge, hold/init, shadow, and
+guarded-pilot protocol, but starts no ROS/VRPN service or marker relay. SONIC
+uses G1 proprioception and the 573-frame HDMI reference; the F/T adapter uses
+low-state kinematics with `--no-pelvis`. Policy/F-T records use atomic 25-frame
+chunks. Normal exceptions and termination signals produce a partial NPZ
+automatically; after `SIGKILL` or power loss, run
+`scripts/finalize_chunked_record.py --output <record>.npz`. G1/F-T read-only
+preflight is hardware-verified; shadow/apply remain separate acceptance stages.
+
+The default pilot keeps the safe controller's joint-limit clipping and
+`0.08 rad/tick` target slew limit enabled. `--direct-policy-targets` remains as
+a commented launcher option for later restoration. Before publication, raw
+SONIC targets fail closed on joint-limit overshoot greater than `0.05 rad` or a
+single-tick jump greater than `0.50 rad`. A controller `pilot_abort:*` stops the
+runner immediately. Runtime F/T invalidity is warning-only and is preserved as
+quality-zero data. The original HDMI NPZ is never modified: the generated
+deployment cache defaults to 2x time interpolation and a nine-frame
+Savitzky-Golay smoothing window.
 
 ## Artifact verification
 
